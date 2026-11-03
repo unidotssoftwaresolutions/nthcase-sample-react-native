@@ -1,13 +1,20 @@
 import { useRef, useState } from 'react';
-import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { PanResponder, StyleSheet, View, type LayoutChangeEvent, type PanResponderGestureState } from 'react-native';
 
 import { useTheme } from './theme';
 
+/** How far, in dp, a finger moves before it is a drag rather than a tap. */
+const SLOP = 8;
+
 /**
  * A slider from React Native's core pieces: the Slider component left React Native core for a community package, so
- * this one is drawn here. A touch anywhere on the track moves the thumb under the finger, so a drag that starts on the
- * thumb (NthCase's `slide` drags the thumb to a fraction of the track) lands where it ends. To a screen reader and to
- * Appium it is an adjustable element with a value, and increment / decrement step it by one.
+ * this one is drawn here. A tap on the track moves the thumb there, and a sideways drag moves it under the finger, so a
+ * drag that starts on the thumb (NthCase's `slide` drags the thumb to a fraction of the track) lands where it ends. To
+ * a screen reader and to Appium it is an adjustable element with a value, and increment / decrement step it by one.
+ *
+ * A swipe up or down that starts on the slider belongs to the page, as on a platform slider: the slider never blocks
+ * the scroll view under it, changes nothing until the finger has moved sideways, and only then stops the page
+ * scrolling. Otherwise a person, or a scroll NthCase plays, whose finger lands on the slider could not scroll the form.
  */
 export function Slider({
   value,
@@ -35,21 +42,40 @@ export function Slider({
   const latest = useRef({ width, min, max, step, onChange, onDragStateChange });
   latest.current = { width, min, max, step, onChange, onDragStateChange };
 
-  // Where the finger came down, in the track's own coordinates; a move adds the gesture's travel to it.
+  // Where the finger came down, in the track's own coordinates; a move adds the gesture's travel to it. A gesture
+  // becomes a drag once it has gone [SLOP] sideways and further sideways than up or down.
   const startX = useRef(0);
+  const dragging = useRef(false);
+  const sideways = (g: PanResponderGestureState) => Math.abs(g.dx) > SLOP && Math.abs(g.dx) > Math.abs(g.dy);
+  const endDrag = () => {
+    if (dragging.current) latest.current.onDragStateChange?.(false);
+    dragging.current = false;
+  };
   const responder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderTerminationRequest: () => false,
+      onMoveShouldSetPanResponder: (_event, gesture) => sideways(gesture),
+      // the scroll view may still take a vertical swipe (Android intercepts it, iOS cancels the touch)
+      onShouldBlockNativeResponder: () => false,
+      onPanResponderTerminationRequest: () => !dragging.current,
       onPanResponderGrant: (event) => {
-        latest.current.onDragStateChange?.(true);
+        dragging.current = false;
         startX.current = event.nativeEvent.locationX;
-        moveTo(startX.current);
       },
-      onPanResponderMove: (_event, gesture) => moveTo(startX.current + gesture.dx),
-      onPanResponderRelease: () => latest.current.onDragStateChange?.(false),
-      onPanResponderTerminate: () => latest.current.onDragStateChange?.(false),
+      onPanResponderMove: (_event, gesture) => {
+        if (!dragging.current) {
+          if (!sideways(gesture)) return;
+          dragging.current = true;
+          latest.current.onDragStateChange?.(true);
+        }
+        moveTo(startX.current + gesture.dx);
+      },
+      onPanResponderRelease: (_event, gesture) => {
+        // a tap: the thumb goes where the finger was
+        if (!dragging.current && Math.abs(gesture.dx) <= SLOP && Math.abs(gesture.dy) <= SLOP) moveTo(startX.current);
+        endDrag();
+      },
+      onPanResponderTerminate: endDrag,
     }),
   ).current;
 

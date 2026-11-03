@@ -8,7 +8,7 @@ import { act, fireEvent, renderRouter, screen, waitFor, within } from 'expo-rout
 import { router } from 'expo-router';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Dimensions } from 'react-native';
+import { DeviceEventEmitter, Dimensions, Platform, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { redirectSystemPath } from '../app/+native-intent';
 import { actions, getState } from '../src/data/store';
@@ -25,6 +25,21 @@ const wait = (ms: number) => act(() => jest.advanceTimersByTime(ms));
 const shows = (id: string, text: string) => expect(byId(id)).toHaveTextContent(text, { exact: false });
 /** One accelerometer reading, in g, to the screen that listens. */
 const shakeReading = (r: { x: number; y: number; z: number }) => act(() => accelerometerFake.listener?.(r));
+type Host = ReturnType<typeof byId>;
+/** The host scroll view that holds the element with [id]. */
+function scrollViewAround(id: string): Host {
+  return scrollViewHolding(byId(id), id);
+}
+/** The host scroll view that holds the text [text] (for the screen without ids). */
+function scrollViewAroundText(text: string): Host {
+  return scrollViewHolding(screen.getByText(text), text);
+}
+function scrollViewHolding(element: Host, what: string): Host {
+  let node: Host | null = element;
+  while (node && node.type !== 'RCTScrollView') node = node.parent as Host | null;
+  if (!node) throw new Error(`no scroll view holds ${what}`);
+  return node;
+}
 
 describe('01 · sign in with the test account', () => {
   it('refuses a wrong password, shows it, then signs in', async () => {
@@ -208,6 +223,40 @@ describe('04 · join the club: every form control', () => {
       `Welcome, Sam Rivera. We'll write to sam@example.test about the Garden aisle and deliver on ${expected}.`,
     );
     expect(byId(TestIds.SNACKBAR_TEXT)).toHaveTextContent('Welcome to the club');
+  });
+
+  it('leaves a vertical swipe that starts on the slider to the page, and sets the budget by a tap', async () => {
+    await launchSignedIn();
+    await tap(TestIds.NAV_LAB);
+    await tap(TestIds.LAB_FORM);
+    const slider = await screen.findByTestId(TestIds.FORM_BUDGET);
+    await fireEvent(slider, 'layout', { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
+    const page = scrollViewAround(TestIds.FORM_BUDGET);
+
+    // a scroll whose finger lands on the slider: the scroll view may take it, and the budget does not move
+    const swipe = new Touches(slider);
+    expect(await swipe.down({ x: 150, y: 24 })).toBe(false);
+    await swipe.move({ x: 152, y: -40 });
+    await swipe.move({ x: 154, y: -260 });
+    expect(page.props.scrollEnabled).toBe(true);
+    await swipe.up();
+    expect(byId(TestIds.FORM_BUDGET_VALUE)).toHaveTextContent('$50');
+
+    // a tap on the track puts the thumb there: 20 % is $40
+    const press = new Touches(slider);
+    await press.down({ x: 60, y: 24 });
+    await press.up();
+    expect(byId(TestIds.FORM_BUDGET_VALUE)).toHaveTextContent('$40');
+
+    // a sideways drag holds the page still while it moves the thumb
+    const drag = new Touches(slider);
+    await drag.down({ x: 60, y: 24 });
+    await drag.move({ x: 120, y: 26 });
+    expect(page.props.scrollEnabled).toBe(false);
+    await drag.move({ x: 240, y: 30 });
+    await drag.up();
+    expect(byId(TestIds.FORM_BUDGET_VALUE)).toHaveTextContent('$160');
+    expect(page.props.scrollEnabled).toBe(true);
   });
 
   it('steps the slider by $10 from a screen reader, and cancels the date picker', async () => {
@@ -506,6 +555,72 @@ describe('10 · gift cards: a screen with no test ids', () => {
     expect(screen.getByText('A $50 card with the Stone design')).toBeTruthy();
     await fireEvent.press(left);
     expect(screen.getByText('A $50 card with the Fern design')).toBeTruthy();
+  });
+});
+
+describe('with the keyboard up: NthCase has no hide-keyboard step (SPEC.md §13)', () => {
+  // Android, as the CI emulator runs it: targetSdk 35+ makes the app edge-to-edge, where adjustResize no longer shrinks
+  // the window for the keyboard. Each screen with a text field must pad itself by the part the keyboard covers, so
+  // its last button scrolls into view above it. The screens are drawn as on Android from the moment they open.
+  let os: jest.ReplaceProperty<string> | undefined;
+  afterEach(async () => {
+    await act(() => DeviceEventEmitter.emit('keyboardDidHide', { endCoordinates: { screenX: 0, screenY: 914, width: 411, height: 0 } }));
+    os?.restore();
+    os = undefined;
+  });
+  const asAndroid = () => {
+    os = jest.replaceProperty(Platform, 'OS', 'android');
+  };
+  /** The view that pads the screen above the keyboard: the one around the scroll view that holds [id]. */
+  const avoider = (id: string) => scrollViewAround(id).parent as Host;
+  const paddingBelow = (view: Host) => StyleSheet.flatten(view.props.style as StyleProp<ViewStyle>)?.paddingBottom ?? 0;
+
+  /** The screen fills a 914 dp phone below a 108 dp bar; a 330 dp keyboard comes up over its bottom. */
+  async function keyboardUpOver(view: Host, top = 108) {
+    await fireEvent(view, 'layout', { nativeEvent: { layout: { x: 0, y: top, width: 411, height: 914 - top } }, persist: () => {} });
+    // what React Native's Android root view sends: screenY is the keyboard's top edge
+    await act(() => DeviceEventEmitter.emit('keyboardDidShow', { endCoordinates: { screenX: 0, screenY: 584, width: 411, height: 330 } }));
+  }
+
+  it('the form: Join scrolls above the keyboard', async () => {
+    await launchSignedIn();
+    await tap(TestIds.NAV_LAB);
+    asAndroid();
+    await tap(TestIds.LAB_FORM);
+    await screen.findByTestId(TestIds.FORM_SCREEN);
+    const view = avoider(TestIds.FORM_SUBMIT);
+    await keyboardUpOver(view);
+    expect(paddingBelow(view)).toBe(330);
+  });
+
+  it('the shop: Clear search on the empty state sits above the keyboard', async () => {
+    await launch();
+    asAndroid();
+    await signIn();
+    await type(TestIds.SHOP_SEARCH, 'velvet');
+    const view = avoider(TestIds.SHOP_EMPTY_ACTION);
+    // below the header, down to the tab bar
+    await fireEvent(view, 'layout', { nativeEvent: { layout: { x: 0, y: 205, width: 411, height: 605 } }, persist: () => {} });
+    await act(() => DeviceEventEmitter.emit('keyboardDidShow', { endCoordinates: { screenX: 0, screenY: 584, width: 411, height: 330 } }));
+    expect(paddingBelow(view)).toBe(226);
+  });
+
+  it('sign in: Sign in scrolls above the keyboard', async () => {
+    asAndroid();
+    await launch();
+    const view = avoider(TestIds.SIGNIN_SUBMIT);
+    await keyboardUpOver(view, 0);
+    expect(paddingBelow(view)).toBe(330);
+  });
+
+  it('gift cards: Check balance scrolls above the keyboard', async () => {
+    await launchSignedIn();
+    await tap(TestIds.NAV_LAB);
+    asAndroid();
+    await tap(TestIds.LAB_GIFT_CARDS);
+    const view = scrollViewAroundText('Check balance').parent as Host;
+    await keyboardUpOver(view);
+    expect(paddingBelow(view)).toBe(330);
   });
 });
 

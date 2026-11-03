@@ -129,6 +129,17 @@ only id-less children, and anything that holds other ids (a dialog, the snackbar
 plain view. `__tests__/ids.test.tsx` renders every screen and fails if an id ever lands inside an accessible
 ancestor.
 
+**On Android, the ids are proven in UiAutomator's own tree.** The CI `screenshots` job walks every state the spec
+names on an emulator (errors shown, the dropdown and date picker open, slow and failed loads, the unknown deep link)
+and reads `uiautomator dump` there, the tree Appium's UiAutomator2 driver reads. Its job summary lists all 138 native
+ids, and names each one it did not see with the reason: a 3 s spinner it missed, a state it never reached, or an id
+hidden from UiAutomator, which fails the job.
+
+**The keyboard never hides a button.** NthCase has no hide-keyboard step (SPEC.md §13), so the form, sign-in, the
+Shop's empty state and Gift cards pad themselves above the keyboard on both platforms. On Android the app is
+edge-to-edge, where the window no longer shrinks for the keyboard. The same CI walk taps Sign in, Clear search, Join
+and Check balance with the keyboard up.
+
 ## How it differs from the native apps
 
 - **Settings** is built like the other screens. SPEC.md asks Android for XML Views and iOS for UIKit there, to cover a

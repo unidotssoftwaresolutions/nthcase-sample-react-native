@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { formatPrice, itemNumber, ITEMS, search, type Item } from '../data/catalog';
@@ -69,43 +69,46 @@ export function ShopScreen() {
           </Text>
         ) : null}
       </View>
-      {load.status === 'loading' ? (
-        <Loading text="Opening the drawers…" testID={TestIds.SHOP_LOADING} />
-      ) : load.status === 'failed' ? (
-        <StateMessage
-          icon="warning"
-          title="The catalogue didn't load"
-          body="Something went wrong on our side. Your cart is safe."
-          actionLabel="Try again"
-          onAction={load.retry}
-          isError
-          testID={TestIds.SHOP_ERROR}
-          actionTestID={TestIds.SHOP_RETRY}
-        />
-      ) : (
-        <FlatList
-          testID={TestIds.SHOP_LIST}
-          data={results}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <DrawerRow item={item} onPress={() => router.push(`/item/${item.id}`)} />}
-          contentContainerStyle={[styles.list, results.length === 0 && { flexGrow: 1 }]}
-          ItemSeparatorComponent={Gap}
-          keyboardShouldPersistTaps="handled"
-          initialNumToRender={ITEMS.length}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.primary]} tintColor={colors.primary} />}
-          ListEmptyComponent={
-            <StateMessage
-              icon="empty"
-              title={`No drawers match "${query.trim()}"`}
-              body="Try a shorter word, or an item number like 7."
-              actionLabel="Clear search"
-              onAction={() => setQuery('')}
-              testID={TestIds.SHOP_EMPTY}
-              actionTestID={TestIds.SHOP_EMPTY_ACTION}
-            />
-          }
-        />
-      )}
+      {/* the list and its states end above the keyboard, so Clear search stays reachable after typing (see FormScreen) */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        {load.status === 'loading' ? (
+          <Loading text="Opening the drawers…" testID={TestIds.SHOP_LOADING} />
+        ) : load.status === 'failed' ? (
+          <StateMessage
+            icon="warning"
+            title="The catalogue didn't load"
+            body="Something went wrong on our side. Your cart is safe."
+            actionLabel="Try again"
+            onAction={load.retry}
+            isError
+            testID={TestIds.SHOP_ERROR}
+            actionTestID={TestIds.SHOP_RETRY}
+          />
+        ) : (
+          <FlatList
+            testID={TestIds.SHOP_LIST}
+            data={results}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={({ item }) => <DrawerRow item={item} onPress={() => router.push(`/item/${item.id}`)} />}
+            contentContainerStyle={[styles.list, results.length === 0 && { flexGrow: 1 }]}
+            ItemSeparatorComponent={Gap}
+            keyboardShouldPersistTaps="handled"
+            initialNumToRender={ITEMS.length}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.primary]} tintColor={colors.primary} />}
+            ListEmptyComponent={
+              <StateMessage
+                icon="empty"
+                title={`No drawers match "${query.trim()}"`}
+                body="Try a shorter word, or an item number like 7."
+                actionLabel="Clear search"
+                onAction={() => setQuery('')}
+                testID={TestIds.SHOP_EMPTY}
+                actionTestID={TestIds.SHOP_EMPTY_ACTION}
+              />
+            }
+          />
+        )}
+      </KeyboardAvoidingView>
     </View>
   );
 }

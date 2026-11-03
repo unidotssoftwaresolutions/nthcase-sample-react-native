@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { actions, credentialsMatch, TEST_EMAIL, TEST_PASSWORD } from '../data/store';
@@ -26,7 +26,8 @@ export function SignInScreen() {
   }
 
   return (
-    <KeyboardAvoidingView testID={TestIds.SIGNIN_SCREEN} behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.surface }}>
+    // padding on Android too: edge-to-edge, the window no longer shrinks for the keyboard (see FormScreen)
+    <KeyboardAvoidingView testID={TestIds.SIGNIN_SCREEN} behavior="padding" style={{ flex: 1, backgroundColor: colors.surface }}>
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.column, { paddingTop: insets.top + Space.xxl, paddingBottom: insets.bottom + Space.xxl }]}

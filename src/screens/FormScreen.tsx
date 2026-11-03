@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CATEGORIES, categoryLabel, type CategoryKey } from '../data/catalog';
@@ -51,7 +51,12 @@ export function FormScreen({ onBack, today = () => new Date() }: { onBack: () =>
   return (
     <Screen testID={TestIds.FORM_SCREEN}>
       <TopBar title="Join the club" onBack={onBack} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      {/*
+        NthCase has no hide-keyboard step (SPEC.md §13), so with the keyboard up every field and Join must still scroll
+        into view above it. On Android too: the app is edge-to-edge (targetSdk 35+), where adjustResize no longer
+        shrinks the window for the keyboard, so the page pads itself by the keyboard's height on both platforms.
+      */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <ScrollView
           scrollEnabled={!sliding}
           keyboardShouldPersistTaps="handled"

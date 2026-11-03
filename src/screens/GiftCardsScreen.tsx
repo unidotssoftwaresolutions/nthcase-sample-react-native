@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { GLYPHS, PEBBLES } from '../generated/art';
 import { Button, Icon, Screen, TextField, TopBar } from '../ui/components';
@@ -27,53 +27,56 @@ export function GiftCardsScreen({ onBack }: { onBack: () => void }) {
   return (
     <Screen>
       <TopBar title="Gift cards" onBack={onBack} tagged={false} />
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-        <Text style={[Type.title, { color: colors.onSurface }]}>Check a balance</Text>
-        {/* no testID: the field's label is all NthCase has */}
-        <TextField
-          label="Card code"
-          value={code}
-          onChangeText={(t) => {
-            setCode(t.toUpperCase());
-            setResult(null);
-          }}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          autoComplete="off"
-        />
-        <Button label="Check balance" onPress={() => setResult(code.trim() === GIFT_CARD_CODE ? GIFT_CARD_BALANCE : GIFT_CARD_UNKNOWN)} />
-        {result ? <Text style={[Type.title, { color: colors.onSurface }]}>{result}</Text> : null}
+      {/* Check balance stays reachable with the keyboard up, on both platforms (see FormScreen) */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+          <Text style={[Type.title, { color: colors.onSurface }]}>Check a balance</Text>
+          {/* no testID: the field's label is all NthCase has */}
+          <TextField
+            label="Card code"
+            value={code}
+            onChangeText={(t) => {
+              setCode(t.toUpperCase());
+              setResult(null);
+            }}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            autoComplete="off"
+          />
+          <Button label="Check balance" onPress={() => setResult(code.trim() === GIFT_CARD_CODE ? GIFT_CARD_BALANCE : GIFT_CARD_UNKNOWN)} />
+          {result ? <Text style={[Type.title, { color: colors.onSurface }]}>{result}</Text> : null}
 
-        <Text style={[Type.title, { color: colors.onSurface, marginTop: Space.sm }]}>Buy a card</Text>
-        <View style={styles.row}>
-          {[10, 25, 50].map((value) => {
-            const selected = amount === value;
-            return (
-              <Pressable
-                key={value}
-                onPress={() => setAmount(value)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected, checked: selected }}
-                style={[
-                  styles.chip,
-                  selected
-                    ? { backgroundColor: colors.secondaryContainer, borderColor: colors.secondaryContainer }
-                    : { borderColor: colors.outline },
-                ]}
-              >
-                {/* selected is a mark as well as a tint */}
-                {selected ? <Icon name="check" size={18} color={colors.onSecondaryContainer} /> : null}
-                <Text style={[Type.label, { color: selected ? colors.onSecondaryContainer : colors.onSurfaceVariant }]}>{`$${value}`}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <View style={[styles.row, { gap: Space.md }]}>
-          <DesignCard title="Fern" body="Green leaves" chosen={design === 'Fern'} onChoose={() => setDesign('Fern')} />
-          <DesignCard title="Stone" body="Grey pebbles" chosen={design === 'Stone'} onChoose={() => setDesign('Stone')} />
-        </View>
-        <Text style={[Type.bodyLarge, { color: colors.onSurface }]}>{design ? `A $${amount} card with the ${design} design` : 'Choose a design'}</Text>
-      </ScrollView>
+          <Text style={[Type.title, { color: colors.onSurface, marginTop: Space.sm }]}>Buy a card</Text>
+          <View style={styles.row}>
+            {[10, 25, 50].map((value) => {
+              const selected = amount === value;
+              return (
+                <Pressable
+                  key={value}
+                  onPress={() => setAmount(value)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected, checked: selected }}
+                  style={[
+                    styles.chip,
+                    selected
+                      ? { backgroundColor: colors.secondaryContainer, borderColor: colors.secondaryContainer }
+                      : { borderColor: colors.outline },
+                  ]}
+                >
+                  {/* selected is a mark as well as a tint */}
+                  {selected ? <Icon name="check" size={18} color={colors.onSecondaryContainer} /> : null}
+                  <Text style={[Type.label, { color: selected ? colors.onSecondaryContainer : colors.onSurfaceVariant }]}>{`$${value}`}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={[styles.row, { gap: Space.md }]}>
+            <DesignCard title="Fern" body="Green leaves" chosen={design === 'Fern'} onChoose={() => setDesign('Fern')} />
+            <DesignCard title="Stone" body="Grey pebbles" chosen={design === 'Stone'} onChoose={() => setDesign('Stone')} />
+          </View>
+          <Text style={[Type.bodyLarge, { color: colors.onSurface }]}>{design ? `A $${amount} card with the ${design} design` : 'Choose a design'}</Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Screen>
   );
 }

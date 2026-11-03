@@ -48,8 +48,11 @@ export class Touches {
     };
   }
 
-  /** Fingers come down at these points (the first call grants the responder). */
-  async down(...fingers: Finger[]) {
+  /**
+   * Fingers come down at these points (the first call grants the responder). Returns what the grant handler returned:
+   * for a PanResponder, whether it blocks the native responder (a scroll view under it).
+   */
+  async down(...fingers: Finger[]): Promise<unknown> {
     this.time += 16;
     const granting = this.bank.length === 0;
     for (const f of fingers) {
@@ -60,7 +63,7 @@ export class Touches {
         previousPageX: f.x, previousPageY: f.y, previousTimeStamp: this.time,
       });
     }
-    await fireEvent(this.element, granting ? 'responderGrant' : 'responderStart', this.event());
+    return fireEvent(this.element, granting ? 'responderGrant' : 'responderStart', this.event());
   }
 
   /** The fingers that are down move to these points, in the order they came down. */
