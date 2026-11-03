@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Continuous Native Generation: android/ and ios/ come from `npx expo prebuild`
+android/
+ios/
+
+# Expo and Metro
+.expo/
+dist/
+web-build/
+
+# Build output
+build/
+*.apk
+*.aab
+*.ipa
+*.app
+*.zip
+*.tgz
+SHA256SUMS
+
+# Local SDK paths and editor files
+local.properties
+.idea/
+.vscode/
+*.iml
+.DS_Store
+npm-debug.*
+*.log
+
+# Signing material never belongs here: releases are debug-signed
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+.env
+.env*.local
+expo-env.d.ts

@@ -1,0 +1,140 @@
+# Tests and builds every pull request, every push to main, and on demand: the Jest tests, then the Android .apk
+# (ubuntu-latest) and the iOS simulator .app (macos-latest), then every screen on an Android emulator, light and dark.
+#
+# Every action is named by its commit, not by a tag someone can move. The version each SHA was on 2026-11-03 is in the
+# comment beside it. To update one, look up the new version's commit, read what changed, and change both.
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --ci
+      - name: expo-doctor
+        run: npx --yes expo-doctor@1.21.6
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci
+      # Continuous Native Generation: android/ is made here from app.json and plugins/, never committed.
+      - run: npx expo prebuild --platform android --clean --no-install
+      # Release build type, signed with the debug keystore as Expo's template does: the JS bundle is inside.
+      - run: ./gradlew assembleRelease --no-daemon --max-workers=3
+        working-directory: android
+      - name: Check the bundle is inside, and name the APK
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          unzip -l "$apk" | grep -q 'assets/index.android.bundle'
+          mkdir -p dist
+          cp "$apk" dist/mossgrove-react-native-ci-debug.apk
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mossgrove-react-native-apk
+          path: dist/mossgrove-react-native-ci-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+      # Expo SDK 58 needs a newer Swift than Xcode 26.2's (ExpoModulesJSI fails to compile there), so take the newest
+      # stable Xcode the runner has, whatever its default is.
+      - name: Use the newest stable Xcode
+        run: |
+          xcode="$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)"
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+      - run: npm ci
+      # ios/ is made here (with pod install), never committed.
+      - run: npx expo prebuild --platform ios --clean
+      - run: scripts/build-ios-simulator.sh ci
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mossgrove-react-native-simulator
+          path: dist/mossgrove-react-native-ci-simulator.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  # Every screen, light and dark, on an Android emulator on GitHub's machine, with round one's file names. The same
+  # run dumps UiAutomator's tree (what Appium's UiAutomator2 driver reads) and reports which spec ids it found as
+  # resource-id. The pictures are an artifact; docs/screenshots/ changes only when someone commits them.
+  screenshots:
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mossgrove-react-native-apk
+          path: dist
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Let the emulator use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # The one third-party action: it starts an emulator, runs the script, and shuts the emulator down.
+      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            adb -s emulator-5554 install -r dist/mossgrove-react-native-ci-debug.apk
+            node scripts/screenshots.mjs
+      - name: Ids seen in the UiAutomator tree
+        if: always()
+        run: cat build/screenshots/android-ids.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mossgrove-react-native-screenshots
+          path: build/screenshots/
+          if-no-files-found: error
+          retention-days: 30
