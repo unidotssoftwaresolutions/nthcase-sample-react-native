@@ -6,7 +6,7 @@
 #   the device suite, when asked      screenshots: every screen, light and dark, on an Android emulator, with the ids
 #   (`devices: true`)                 in UiAutomator's tree and the keyboard-up taps
 #
-# build.yml asks for the device suite on "Run workflow" and on the weekly schedule; release.yml always does. On a push
+# build.yml asks for the device suite on "Run workflow" and on the monthly schedule; release.yml always does. On a push
 # or a pull request the screenshots job is skipped: no emulator starts.
 #
 # One run tells every failure: the builds do not wait for the tests, each check step runs even when an earlier check

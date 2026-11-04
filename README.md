@@ -206,7 +206,7 @@ A push to `main` or a pull request runs the fast checks, with no emulator and no
 by side, in about 20 to 25 minutes (the two native builds). A push that changes only `README.md`, `CONTRIBUTING.md`,
 `SECURITY.md`, `LICENSE`, `NOTICE` or `docs/screenshots/` starts nothing. The device suite, the `screenshots` job on an
 Android emulator (every screen, light and dark, the ids and the keyboard-up taps, about 20 minutes more), runs on "Run
-workflow", every Monday at 03:17 UTC, and before every release: a `v*` tag publishes only when the fast checks and the
+workflow", at 03:17 UTC on the 1st of each month, and before every release: a `v*` tag publishes only when the fast checks and the
 suite are green. To start the suite by hand, open Actions → build → Run workflow on `main`, or run
 `gh workflow run build.yml --ref main`. The jobs are in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 

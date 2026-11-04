@@ -2,14 +2,14 @@
 #
 #   a push to main, a pull request    the fast checks only: typecheck, Jest, expo-doctor, the walk's plan, the .apk and
 #                                     the zipped simulator .app (about 20 to 25 minutes: the two native builds)
-#   "Run workflow", every Monday      the fast checks and the device suite: every screen, light and dark, on an Android
+#   "Run workflow", the 1st monthly  the fast checks and the device suite: every screen, light and dark, on an Android
 #                                     emulator (about 20 minutes more)
 #
 # A push or a pull request that changes only the files below starts nothing: no test, no build step and no script reads
 # them (docs/screenshots/ holds pictures copied from a CI artifact by hand). SPEC.md, nthcase/ and art/ are NOT here:
 # the tests and scripts/derive-assets.mjs read them.
 #
-# A newer push to the same branch or pull request cancels the older run. "Run workflow" and the weekly run are never
+# A newer push to the same branch or pull request cancels the older run. "Run workflow" and the monthly run are never
 # cancelled by a push, and release.yml has no concurrency at all: a release always runs to its end.
 name: build
 
@@ -33,8 +33,8 @@ on:
       - docs/screenshots/**
   workflow_dispatch:
   schedule:
-    # Monday 03:17 UTC: the device suite once a week, so drift in the runner's emulator is still caught
-    - cron: "17 3 * * 1"
+    # 03:17 UTC on the 1st of each month: the device suite once a month, so drift in the runner's emulator is still caught
+    - cron: "17 3 1 * *"
 
 permissions:
   contents: read
