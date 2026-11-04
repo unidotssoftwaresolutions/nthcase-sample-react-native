@@ -115,8 +115,9 @@ jobs:
   screenshots:
     needs: android
     runs-on: ubuntu-latest
-    # the walk reads the tree in 29 states per theme, from 11 cold starts each: about twice the first walk's work
-    timeout-minutes: 60
+    # the walk reads the tree in 29 states per theme, from 11 cold starts each: about twice the first walk's work. It
+    # starts no segment after 50 minutes and waits at most 5 for a lost device, so its reports are written before this.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -138,6 +139,10 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_6
+          # the runner has 4 cores and 16 GB; the action's default is 2 cores and the profile's RAM. Run 41740214045
+          # lost the emulator 1 minute into the walk, and an emulator starved on API 35 is the likeliest cause.
+          cores: 4
+          ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           script: |
@@ -146,7 +151,8 @@ jobs:
       - name: The walk and the ids, in the job summary
         if: ${{ !cancelled() }}
         run: cat build/screenshots/walk.md build/screenshots/android-ids.md >> "$GITHUB_STEP_SUMMARY" || true
-      # the pictures, every state's tree, the reports and, for a segment that stopped, its screen and tree
+      # the pictures, every state's tree, the reports and, for a segment that stopped, its screen and tree (and, for a
+      # lost device, what the guest logged once it was back)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:

@@ -14,6 +14,10 @@
 // not walked (the segment stopped before its state, with the error), or hidden from UiAutomator (the walk stood in
 // its state and no node had it as resource-id: a defect).
 //
+// When adb loses the emulator (offline, not found), the walk waits up to 5 minutes for it to come back, writes what
+// the runner and the guest say about it, and retries that segment once from a cold start. If it does not come back,
+// every later segment is reported as "device lost" and the walk ends. walk.md lists each loss.
+//
 //   node scripts/screenshots.mjs          the walk (needs adb and the emulator)
 //   node scripts/screenshots.mjs --plan   checks, without a device, that the walk names a state for every spec id
 //
@@ -125,9 +129,51 @@ function planProblems() {
 // ---- adb -----------------------------------------------------------------------------------------------------------
 
 const serial = process.env.ANDROID_SERIAL ?? 'emulator-5554';
-const adb = (...args) => execFileSync('adb', ['-s', serial, ...args], { maxBuffer: 64 * 1024 * 1024 });
-const shell = (...args) => adb('shell', ...args).toString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** The emulator stopped answering adb. The segment is retried once the device is back (see recover()). */
+class DeviceLost extends Error {}
+/** What adb says when it has no device to talk to, as opposed to a command that failed on the device. */
+const LOST = /device offline|device '[^']*' not found|no devices\/emulators found|device unauthorized|error: closed|protocol fault/i;
+/** Set when the device did not come back: every later segment is "device lost", and no adb command is sent. */
+let deviceGone = '';
+
+/** One adb call, bounded: a dump or a screencap on a slow device takes seconds, never 90. */
+function adbOnce(args, timeout = 90_000) {
+  return execFileSync('adb', args, { maxBuffer: 64 * 1024 * 1024, timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+/** What adb says the device is: "device" when it answers, else "offline", "unknown", ... */
+function deviceState() {
+  try {
+    return adbOnce(['-s', serial, 'get-state'], 10_000).toString().trim() || 'unknown';
+  } catch (error) {
+    return (String(error.stderr ?? '').match(LOST)?.[0] ?? 'unknown').toLowerCase();
+  }
+}
+
+function adb(...args) {
+  if (deviceGone) throw new DeviceLost(`device lost: ${deviceGone}`);
+  try {
+    return adbOnce(['-s', serial, ...args]);
+  } catch (error) {
+    const what = `adb ${args.slice(0, 3).join(' ')}`;
+    const said = String(error.stderr ?? '').trim().split('\n').at(-1) ?? '';
+    if (LOST.test(said)) throw new DeviceLost(`device lost: ${what} said "${said}"`);
+    if (error.code === 'ETIMEDOUT') {
+      const state = deviceState();
+      if (state !== 'device') throw new DeviceLost(`device lost: ${what} did not answer in 90 s, and the device is ${state}`);
+      throw new Error(`${what} did not answer in 90 s`);
+    }
+    throw new Error(`${what} failed: ${said || error.message.split('\n')[0]}`);
+  }
+}
+const shell = (...args) => adb('shell', ...args).toString();
+/** Whether a wait for something on screen succeeded. A lost device is not "it did not show": it stops the segment. */
+const shows = (promise) => promise.then(() => true, (error) => {
+  if (error instanceof DeviceLost) throw error;
+  return false;
+});
 
 let screen;
 /** The screen in pixels, and dp → px. */
@@ -158,7 +204,8 @@ function dump() {
       shell('rm', '-f', '/sdcard/mossgrove-ui.xml');
       shell('uiautomator', 'dump', '/sdcard/mossgrove-ui.xml');
       xml = adb('exec-out', 'cat', '/sdcard/mossgrove-ui.xml').toString();
-    } catch {
+    } catch (error) {
+      if (error instanceof DeviceLost) throw error;
       xml = '';
     }
   }
@@ -222,7 +269,8 @@ async function clearField() {
 function keyboardShown() {
   try {
     return /mInputShown=true/.test(shell('dumpsys', 'input_method'));
-  } catch {
+  } catch (error) {
+    if (error instanceof DeviceLost) throw error;
     return false;
   }
 }
@@ -393,7 +441,7 @@ async function signInAndShop() {
   await typeText('letmein1');
   const up = keyboardShown();
   await tap(await scrollTo('signin_submit'));
-  const refused = await byText('Wrong email or password', 5000).then(() => true, () => false);
+  const refused = await shows(byText('Wrong email or password', 5000));
   check('Sign in, tapped with the keyboard up', refused, refused
     ? `the refusal showed${up ? '' : ' (the input method did not report the keyboard up)'}`
     : 'the tap did not reach Sign in: no refusal showed');
@@ -425,7 +473,7 @@ async function signInAndShop() {
   await sleep(500);
   const upForClear = keyboardShown();
   await tap(await scrollTo('shop_empty_action'));
-  const cleared = await byTextPart('40 drawers ·', 5000).then(() => true, () => false);
+  const cleared = await shows(byTextPart('40 drawers ·', 5000));
   check('Clear search, tapped with the keyboard up', cleared, cleared
     ? `the list came back${upForClear ? '' : ' (the input method did not report the keyboard up)'}`
     : 'the tap did not reach Clear search: the list did not come back');
@@ -505,7 +553,7 @@ async function labAndForm() {
     check('Join, tapped with the keyboard up', false, 'the keyboard never came up after typing, so the check could not run');
   } else {
     await tap(await scrollTo('form_submit'));
-    const joined = await byId('form_result', 5000).then(() => true, () => false);
+    const joined = await shows(byId('form_result', 5000));
     check('Join, tapped with the keyboard up', joined, joined
       ? `joined; the form ended at y=${page?.y2} of ${size().height}, above the keyboard`
       : `the tap did not reach Join (the form ends at y=${page?.y2} of ${size().height}): the keyboard covers it`);
@@ -614,7 +662,7 @@ async function giftCards() {
   await typeText('MOSS-0025');
   const up = keyboardShown();
   await tap(await byText('Check balance'));
-  const balance = await byText('Balance: $25.00', 5000).then(() => true, () => false);
+  const balance = await shows(byText('Balance: $25.00', 5000));
   check('Check balance, tapped with the keyboard up', balance, balance
     ? `the balance showed${up ? '' : ' (the input method did not report the keyboard up)'}`
     : 'the tap did not reach Check balance: no balance showed');
@@ -729,6 +777,16 @@ function reports() {
     '',
     `UiAutomator dumps that failed five times in a row: ${failedDumps}.`,
     '',
+    '## The device',
+    '',
+    ...(losses.length
+      ? [
+        `The emulator stopped answering adb ${losses.length} time${losses.length > 1 ? 's' : ''}. Each time the walk waited for it, and retried the segment once from a cold start if it came back:`,
+        '',
+        ...losses.map((l) => `- ${l.theme}, ${l.segment}, attempt ${l.attempt}: ${l.back ? `**back** after ${l.seconds} s` : `**not back** after ${l.seconds} s`}. ${l.detail}.${l.file ? ` The guest's log: \`${l.file}\`.` : ''}`),
+      ]
+      : ['The emulator answered adb through the whole walk.']),
+    '',
     '## Log',
     '',
     '```',
@@ -746,11 +804,141 @@ function reports() {
   ];
   console.log(`\n${seenBoth} of ${rows.length} native ids seen in their state in both themes; ${misses.length - failing.length} transient misses.`);
   console.log(`Screenshots: ${THEMES.map((t) => `${t} ${shots[t].size}/${SHOTS.length}`).join(', ')}.`);
+  if (losses.length) console.log(`The device was lost ${losses.length} time(s): ${losses.map((l) => `${l.theme}, ${l.segment}: ${l.back ? 'back' : 'not back'}`).join('; ')}.`);
   if (failures.length) console.log(`\n${failures.length} failures:\n${failures.map((f) => `  - ${f}`).join('\n')}`);
   return failures.length;
 }
 
+// ---- a lost device -------------------------------------------------------------------------------------------------
+
+/** How many times the walk waits for a lost device before it calls it gone: each wait can take 5 minutes. */
+const RECOVERIES = 3;
+/** The walk starts no segment after this, so its reports are written well inside the job's 75 minutes. */
+const WALK_BUDGET_MS = 50 * 60_000;
+const walkStarted = Date.now();
+
+/** Each time the device was lost: { theme, segment, attempt, back, seconds, detail, file } */
+const losses = [];
+
+/** The guest's seconds since boot. A smaller number after a loss means the guest itself rebooted. */
+function guestUptime() {
+  try {
+    return Number(adbOnce(['-s', serial, 'shell', 'cat', '/proc/uptime'], 10_000).toString().split(/\s+/)[0]) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The runner's own view, by count only: whether the emulator process still runs, and the memory left. */
+function host() {
+  const run = (cmd, args) => {
+    try {
+      return execFileSync(cmd, args, { timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch (error) {
+      return String(error.stdout ?? '').trim();
+    }
+  };
+  const count = run('pgrep', ['-c', '-f', 'qemu-system']);
+  const mem = run('free', ['-m']).match(/^Mem:\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)/m);
+  return { emulators: count === '' ? undefined : Number(count), memory: mem ? `${mem[2]} of ${mem[1]} MB available` : 'unknown' };
+}
+
+/**
+ * The device stopped answering: waits for it (adb reconnect, wait-for-device, sys.boot_completed), up to 5 minutes,
+ * and says why it was lost as far as the runner and the guest can tell. Returns whether the device is back.
+ */
+async function recover(segment, attempt, error, uptimeBefore) {
+  const started = Date.now();
+  const before = host();
+  const notes = [
+    `${error.message}`,
+    `the emulator process ${before.emulators === undefined ? 'could not be counted' : before.emulators ? 'still runs' : 'is gone'}; the runner has ${before.memory}`,
+  ];
+  say(`    DEVICE LOST: ${error.message}; ${notes[1]}`);
+  let back = false;
+  if (losses.length >= RECOVERIES) {
+    notes.push(`the device was already lost ${losses.length} times, so the walk does not wait again`);
+  } else if (before.emulators === 0) {
+    notes.push('with no emulator process, nothing can come back');
+  } else {
+    try {
+      adbOnce(['reconnect', 'offline'], 15_000);
+    } catch {
+      // adb may have nothing to reconnect; the wait below decides
+    }
+    try {
+      adbOnce(['-s', serial, 'wait-for-device'], 120_000);
+    } catch {
+      // still not back after 2 minutes; the loop below gives it the rest of the 5
+    }
+    while (!back && Date.now() - started < 300_000) {
+      try {
+        back = adbOnce(['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], 10_000).toString().trim() === '1';
+      } catch {
+        // not yet
+      }
+      if (!back) await sleep(2000);
+    }
+  }
+  const seconds = Math.round((Date.now() - started) / 1000);
+  let file = '';
+  if (back) {
+    const uptime = guestUptime();
+    notes.push(uptime !== undefined && uptimeBefore !== undefined && uptime < uptimeBefore
+      ? `the guest rebooted (up ${Math.round(uptime)} s, ${Math.round(uptimeBefore)} s at the segment's start)`
+      : 'the guest ran on: only adb lost it');
+    // after a reboot the screen may be locked; the action unlocks it the same way after its boot
+    try {
+      adbOnce(['-s', serial, 'shell', 'input', 'keyevent', '82'], 10_000);
+    } catch {
+      // the segment's cold start will say if the screen is not usable
+    }
+    // what the guest logged: a crash or a watchdog line says which part of the system went
+    try {
+      mkdirSync(join(out, 'failures'), { recursive: true });
+      file = join('failures', `device-lost-${theme}-${segment.replaceAll(/[^a-z0-9]+/gi, '-')}-${attempt}.txt`);
+      const log = (args) => {
+        try {
+          return adbOnce(['-s', serial, 'logcat', '-d', ...args], 30_000).toString();
+        } catch (e) {
+          return `(${e.message.split('\n')[0]})\n`;
+        }
+      };
+      writeFileSync(join(out, file), `${notes.join('\n')}\n\n== crash buffer\n${log(['-b', 'crash'])}\n== the last 500 lines\n${log(['-b', 'main,system', '-t', '500'])}`);
+    } catch {
+      file = '';
+    }
+  }
+  losses.push({ theme, segment, attempt, back, seconds, detail: notes.slice(1).join('; '), file });
+  say(`    ${back ? `the device came back after ${seconds} s` : `the device did not come back (${seconds} s)`}: ${notes.slice(1).join('; ')}`);
+  if (!back) deviceGone = `the emulator went offline in "${segment}" (${theme}) and did not come back: ${notes.slice(1).join('; ')}`;
+  return back;
+}
+
 // ---- the run -------------------------------------------------------------------------------------------------------
+
+/** One segment, retried once if the device was lost and came back. Returns why it stopped, or '' when it ran through. */
+async function runSegment(name, walk) {
+  for (let attempt = 1; ; attempt++) {
+    if (deviceGone) return `device lost: ${deviceGone}`;
+    const ownChecks = checks.length;
+    const uptime = guestUptime();
+    try {
+      await walk();
+      return '';
+    } catch (error) {
+      if (!(error instanceof DeviceLost)) return String(error?.message ?? error).split('\n')[0];
+      const back = deviceGone ? false : await recover(name, attempt, error, uptime);
+      if (back && attempt === 1) {
+        // the retry runs this attempt's checks again, on a device that is back
+        checks.splice(ownChecks);
+        say(`    retrying "${name}" from a cold start`);
+        continue;
+      }
+      return back ? `${error.message}, again on the retry after the device came back` : `device lost: ${deviceGone}`;
+    }
+  }
+}
 
 const problems = planProblems();
 if (problems.length) {
@@ -764,20 +952,21 @@ try {
     say(`${theme}:`);
     for (const [name, walk] of SEGMENTS) {
       say(`  ${name}`);
+      const why = Date.now() - walkStarted > WALK_BUDGET_MS
+        ? `not started: the walk had used its ${WALK_BUDGET_MS / 60_000} minutes`
+        : await runSegment(name, walk);
+      if (!why) continue;
+      stopped[theme][name] = why;
+      say(`    STOPPED: ${why}`);
+      if (deviceGone || why.startsWith('not started')) continue;
       try {
-        await walk();
-      } catch (error) {
-        stopped[theme][name] = String(error?.message ?? error).split('\n')[0];
-        say(`    STOPPED: ${stopped[theme][name]}`);
-        try {
-          mkdirSync(join(out, 'failures'), { recursive: true });
-          const file = `${theme}-${name.replaceAll(/[^a-z0-9]+/gi, '-')}`;
-          writeFileSync(join(out, 'failures', `${file}.png`), adb('exec-out', 'screencap', '-p'));
-          dump();
-          writeFileSync(join(out, 'failures', `${file}.xml`), lastXml);
-        } catch {
-          // the device is gone; the report still says what stopped
-        }
+        mkdirSync(join(out, 'failures'), { recursive: true });
+        const file = `${theme}-${name.replaceAll(/[^a-z0-9]+/gi, '-')}`;
+        writeFileSync(join(out, 'failures', `${file}.png`), adb('exec-out', 'screencap', '-p'));
+        dump();
+        writeFileSync(join(out, 'failures', `${file}.xml`), lastXml);
+      } catch {
+        // the device went with the segment; the report still says what stopped
       }
     }
   }
