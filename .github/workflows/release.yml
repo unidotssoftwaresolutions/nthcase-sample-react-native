@@ -1,5 +1,8 @@
-# On a v* tag: test, build the debug-signed .apk and the zipped simulator .app, and attach both to a GitHub Release
-# with SHA256SUMS.
+# On a v* tag: every check (ci.yml, the fast checks and the device suite on an Android emulator), and only when all of
+# them are green, the GitHub Release with the debug-signed .apk, the zipped simulator .app and SHA256SUMS. A red check
+# publishes nothing.
+#
+# No concurrency: a release is never cancelled halfway.
 #
 # No secrets: the APK is signed with the build's own debug keystore, and the simulator .app is not signed at all,
 # which is what lets anyone install and test them. The token is the run's own GITHUB_TOKEN, and only the release
@@ -15,91 +18,31 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test -- --ci
-
-  android:
-    needs: test
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: npm
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: "21"
-      - run: npm ci
-      - run: npx expo prebuild --platform android --clean --no-install
-      - run: ./gradlew assembleRelease --no-daemon --max-workers=3
-        working-directory: android
-      - name: Name the APK after the tag
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          apk=android/app/build/outputs/apk/release/app-release.apk
-          unzip -l "$apk" | grep -q 'assets/index.android.bundle'
-          mkdir -p dist
-          cp "$apk" "dist/mossgrove-react-native-${TAG}-debug.apk"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: android
-          path: dist/
-          if-no-files-found: error
-
-  ios:
-    needs: test
-    runs-on: macos-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: npm
-      # Expo SDK 58 needs a newer Swift than Xcode 26.2's (ExpoModulesJSI fails to compile there), so take the newest
-      # stable Xcode the runner has, whatever its default is.
-      - name: Use the newest stable Xcode
-        run: |
-          xcode="$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)"
-          sudo xcode-select -s "$xcode"
-          xcodebuild -version
-      - run: npm ci
-      - run: npx expo prebuild --platform ios --clean
-      - env:
-          TAG: ${{ github.ref_name }}
-        run: scripts/build-ios-simulator.sh "$TAG"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios
-          path: dist/
-          if-no-files-found: error
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ github.ref_name }}
+      devices: true
 
   github-release:
-    needs: [android, ios]
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 5
         with:
+          name: mossgrove-react-native-apk
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 5
+        with:
+          name: mossgrove-react-native-simulator
+          path: dist
       - name: Create the release
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}

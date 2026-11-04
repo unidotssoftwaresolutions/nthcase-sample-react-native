@@ -199,6 +199,17 @@ art/  nthcase/  SPEC.md  the shared sources, unchanged
 docs/screenshots/        every screen, light and dark (from CI)
 ```
 
+## CI
+
+A push to `main` or a pull request runs the fast checks, with no emulator and no simulator: typecheck, Jest,
+`expo-doctor` and the walk's plan, the `.apk` on `ubuntu-latest` and the zipped simulator `.app` on `macos-latest`, side
+by side, in about 20 to 25 minutes (the two native builds). A push that changes only `README.md`, `CONTRIBUTING.md`,
+`SECURITY.md`, `LICENSE`, `NOTICE` or `docs/screenshots/` starts nothing. The device suite, the `screenshots` job on an
+Android emulator (every screen, light and dark, the ids and the keyboard-up taps, about 20 minutes more), runs on "Run
+workflow", every Monday at 03:17 UTC, and before every release: a `v*` tag publishes only when the fast checks and the
+suite are green. To start the suite by hand, open Actions → build → Run workflow on `main`, or run
+`gh workflow run build.yml --ref main`. The jobs are in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+
 ## Licence
 
 Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Mossgrove, its items and its drawings are fictional and were
