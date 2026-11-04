@@ -145,8 +145,13 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          # The smoke start runs once after the install: it starts the app, waits 60 s for its sign-in screen and says
+          # what is on screen either way. If the app does not start it says so in one line (an error annotation) and
+          # the walk, which reads its smoke.json, writes its reports without running and fails. "|| true" only lets the
+          # walk's line run to write them: the walk fails the step.
           script: |
             adb -s emulator-5554 install -r dist/mossgrove-react-native-ci-debug.apk
+            node scripts/screenshots.mjs --smoke || true
             node scripts/screenshots.mjs
       - name: The walk and the ids, in the job summary
         if: ${{ !cancelled() }}

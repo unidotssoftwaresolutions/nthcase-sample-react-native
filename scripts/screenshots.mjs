@@ -18,7 +18,17 @@
 // the runner and the guest say about it, and retries that segment once from a cold start. If it does not come back,
 // every later segment is reported as "device lost" and the walk ends. walk.md lists each loss.
 //
+// The system's own error dialog for ANOTHER app ("Pixel Launcher isn't responding", "… keeps stopping") takes the
+// focus from every window, so UiAutomator reads only the dialog. Run 41779937201 lost its whole walk to one that
+// nobody closed. Wherever the walk reads the tree it closes such a dialog with "Close app" and records it in walk.md.
+// The same dialog for Mossgrove itself is never closed: it is the app's defect, and the segment stops on it.
+//
+// Every stop prints what was on screen: the focused window, the top activity, the tree's size and first texts and
+// ids, whether the app's process runs, and the crash buffer. The smoke start (--smoke, run once after the install)
+// starts the app and waits 60 s for its sign-in screen; if the app does not start, the walk does not run.
+//
 //   node scripts/screenshots.mjs          the walk (needs adb and the emulator)
+//   node scripts/screenshots.mjs --smoke  starts the app once and says what is on screen (needs the emulator)
 //   node scripts/screenshots.mjs --plan   checks, without a device, that the walk names a state for every spec id
 //
 // It talks to the emulator through adb only, by its serial ($ANDROID_SERIAL, default emulator-5554). Never run it on
@@ -196,8 +206,19 @@ let lastXml = '';
 let lastNodes = [];
 let failedDumps = 0;
 
-/** The current window's nodes, as UiAutomator dumps them. A dump can fail while something animates; it is retried. */
-function dump() {
+function parse(xml) {
+  return [...xml.matchAll(/<node ([^>]*?)\/?>/g)].map(([, attrs]) => {
+    const a = Object.fromEntries([...attrs.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, decode(v)]));
+    const [x1, y1, x2, y2] = (a.bounds?.match(/\d+/g) ?? [0, 0, 0, 0]).map(Number);
+    return {
+      id: a['resource-id'] ?? '', text: a.text ?? '', desc: a['content-desc'] ?? '', cls: a.class ?? '', pkg: a.package ?? '',
+      scrollable: a.scrollable === 'true', x: (x1 + x2) / 2, y: (y1 + y2) / 2, y1, y2, h: y2 - y1,
+    };
+  });
+}
+
+/** One dump of the focused window, retried while something animates. Returns '' after five failures. */
+function dumpOnce() {
   let xml = '';
   for (let attempt = 0; attempt < 5 && !xml.includes('<hierarchy'); attempt++) {
     try {
@@ -209,17 +230,107 @@ function dump() {
       xml = '';
     }
   }
+  return xml;
+}
+
+/** The app's name as the system writes it in its own dialogs ("Mossgrove isn't responding"). */
+const APP_LABEL = 'Mossgrove';
+/** The segment the walk is in, for the record of a system dialog ("smoke" for the smoke start). */
+let segmentNow = '';
+/** Each system error dialog the walk closed: { theme, segment, title } */
+const dialogs = [];
+
+/**
+ * The system's error dialog ("… isn't responding", "… keeps stopping"), if the tree is one: its title and its
+ * "Close app" button. These dialogs are the system's, with android:id/aerr_* buttons, and take the focus from every app.
+ */
+function errorDialog(nodes) {
+  if (!nodes.some((n) => n.id.startsWith('android:id/aerr_'))) return undefined;
+  const title = nodes.find((n) => n.id === 'android:id/alertTitle')?.text || nodes.find((n) => n.text)?.text || '(no title)';
+  return { title, close: nodes.find((n) => n.id === 'android:id/aerr_close'), ours: title.startsWith(`${APP_LABEL} `) };
+}
+
+/**
+ * The current window's nodes, as UiAutomator dumps them. Another app's system error dialog is closed and the tree read
+ * again (at most three times a dump); the app's own is never closed, and stops the segment as the app's defect.
+ */
+function dump() {
+  let xml = dumpOnce();
+  for (let closed = 0; closed < 3; closed++) {
+    const dialog = errorDialog(parse(xml));
+    if (!dialog) break;
+    if (dialog.ours) throw new Error(`the system says "${dialog.title}": the app's own error dialog is on screen`);
+    if (!dialog.close) break;
+    shell('input', 'tap', String(Math.round(dialog.close.x)), String(Math.round(dialog.close.y)));
+    dialogs.push({ theme, segment: segmentNow, title: dialog.title });
+    say(`    SYSTEM DIALOG closed: "${dialog.title}" (not the app's; "Close app" tapped, the walk goes on)`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    xml = dumpOnce();
+  }
   if (!xml.includes('<hierarchy')) failedDumps++;
   lastXml = xml;
-  lastNodes = [...xml.matchAll(/<node ([^>]*?)\/?>/g)].map(([, attrs]) => {
-    const a = Object.fromEntries([...attrs.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, decode(v)]));
-    const [x1, y1, x2, y2] = (a.bounds?.match(/\d+/g) ?? [0, 0, 0, 0]).map(Number);
-    return {
-      id: a['resource-id'] ?? '', text: a.text ?? '', desc: a['content-desc'] ?? '', cls: a.class ?? '', scrollable: a.scrollable === 'true',
-      x: (x1 + x2) / 2, y: (y1 + y2) / 2, y1, y2, h: y2 - y1,
-    };
-  });
+  lastNodes = parse(xml);
   return lastNodes;
+}
+
+/** The focused window and app, from the window manager: cheap enough to ask before every picture. */
+function focus() {
+  const text = shell('dumpsys window | grep -E "mCurrentFocus|mFocusedApp"; true');
+  return {
+    window: text.match(/mCurrentFocus=(.*)/)?.[1]?.trim() ?? '(none)',
+    app: text.match(/mFocusedApp=(.*)/)?.[1]?.trim() ?? '(none)',
+  };
+}
+/** A system error dialog has the focus: its window is "Application Not Responding: <package>" or "Application Error: …". */
+const SYSTEM_DIALOG = /Application (Not Responding|Error)/;
+
+/**
+ * What is on the device right now, said in lines for the log: the focused window, the top activity, the tree (size,
+ * first texts and ids), the app's process, and the crash buffer. It reads the raw tree and closes nothing.
+ */
+function onScreen() {
+  const lines = [];
+  const read = (label, fn) => {
+    try {
+      lines.push(`${label}: ${fn()}`);
+    } catch (error) {
+      lines.push(`${label}: (could not read: ${String(error?.message ?? error).split('\n')[0]})`);
+      if (error instanceof DeviceLost) throw error;
+    }
+  };
+  try {
+    read('guest up', () => `${Math.round(Number(shell('cat', '/proc/uptime').split(/\s+/)[0]))} s since boot`);
+    read('focused window', () => focus().window);
+    read('top activity', () => {
+      const text = shell('dumpsys activity activities | grep -E "topResumedActivity|mResumedActivity"; true');
+      const top = text.match(/(?:topResumedActivity=|mResumedActivity: )ActivityRecord\{\S+ \S+ (\S+)/)?.[1];
+      return top ? `${top} (package ${top.split('/')[0]})` : `(none)${text.trim() ? `: ${text.trim().split('\n')[0]}` : ''}`;
+    });
+    read('tree', () => {
+      const xml = dumpOnce();
+      const nodes = parse(xml);
+      const first = (values) => [...new Set(values.filter(Boolean))].slice(0, 10);
+      const texts = first(nodes.map((n) => n.text || n.desc)).map((t) => `"${t.slice(0, 60)}"`);
+      const ids = first(nodes.map((n) => n.id));
+      const pkgs = first(nodes.map((n) => n.pkg));
+      return `${Buffer.byteLength(xml)} bytes, ${nodes.length} nodes${xml.includes('<hierarchy') ? '' : ' (no hierarchy: the dump failed five times)'}; packages: ${pkgs.join(' ') || '(none)'}; texts: ${texts.join(', ') || '(none)'}; ids: ${ids.join(' ') || '(none)'}`;
+    });
+    read(`process ${PACKAGE}`, () => {
+      try {
+        return `running (pid ${shell('pidof', PACKAGE).trim()})`;
+      } catch (error) {
+        if (error instanceof DeviceLost) throw error;
+        return 'NOT running';
+      }
+    });
+    read('crash buffer', () => {
+      const crash = shell('logcat', '-b', 'crash', '-d').trim().split('\n').filter((l) => l.trim() && !l.startsWith('--------- beginning of'));
+      return crash.length ? `${crash.length} lines; the last: ${crash.slice(-8).map((l) => l.trim()).join(' / ')}` : '(empty)';
+    });
+  } catch {
+    // the device is lost: the lines read so far say so
+  }
+  return lines;
 }
 
 /** Where on screen a tap still lands on the app: above the system bar, and above the tab bar on a tab screen. */
@@ -350,6 +461,8 @@ let theme = 'light';
 async function capture(name) {
   await sleep(600);
   await hideKeyboardForPicture();
+  // a system dialog that came up since the last read would be in the picture: dump() closes another app's
+  if (SYSTEM_DIALOG.test(focus().window)) dump();
   const png = adb('exec-out', 'screencap', '-p');
   mkdirSync(join(out, theme), { recursive: true });
   writeFileSync(join(out, theme, `${name}.png`), png);
@@ -787,6 +900,26 @@ function reports() {
       ]
       : ['The emulator answered adb through the whole walk.']),
     '',
+    ...(dialogs.length
+      ? [
+        `The system showed its error dialog for another app ${dialogs.length} time${dialogs.length > 1 ? 's' : ''}. It takes the focus from every app, so the walk closed it ("Close app") and read the tree again. It is the emulator's, not Mossgrove's:`,
+        '',
+        ...dialogs.map((d) => `- ${d.theme}, ${d.segment}: "${d.title}"`),
+      ]
+      : ['No system error dialog came up.']),
+    '',
+    '## The smoke start',
+    '',
+    ...(smoke
+      ? [
+        smoke.ok ? `The sign-in screen showed ${smoke.seconds} s after the start.` : `**The app did not start** in ${smoke.seconds} s: ${smoke.why}. The walk did not run.`,
+        '',
+        'On screen at its end:',
+        '',
+        ...smoke.onScreen.map((l) => `- ${l}`),
+      ]
+      : ['It did not run (no `smoke.json`).']),
+    '',
     '## Log',
     '',
     '```',
@@ -804,6 +937,8 @@ function reports() {
   ];
   console.log(`\n${seenBoth} of ${rows.length} native ids seen in their state in both themes; ${misses.length - failing.length} transient misses.`);
   console.log(`Screenshots: ${THEMES.map((t) => `${t} ${shots[t].size}/${SHOTS.length}`).join(', ')}.`);
+  if (smoke && !smoke.ok) console.log(`The app did not start: ${smoke.why}. The walk did not run; smoke.txt says what was on screen.`);
+  if (dialogs.length) console.log(`System error dialogs closed: ${dialogs.length} (${[...new Set(dialogs.map((d) => d.title))].join('; ')}).`);
   if (losses.length) console.log(`The device was lost ${losses.length} time(s): ${losses.map((l) => `${l.theme}, ${l.segment}: ${l.back ? 'back' : 'not back'}`).join('; ')}.`);
   if (failures.length) console.log(`\n${failures.length} failures:\n${failures.map((f) => `  - ${f}`).join('\n')}`);
   return failures.length;
@@ -919,6 +1054,7 @@ async function recover(segment, attempt, error, uptimeBefore) {
 
 /** One segment, retried once if the device was lost and came back. Returns why it stopped, or '' when it ran through. */
 async function runSegment(name, walk) {
+  segmentNow = name;
   for (let attempt = 1; ; attempt++) {
     if (deviceGone) return `device lost: ${deviceGone}`;
     const ownChecks = checks.length;
@@ -940,6 +1076,72 @@ async function runSegment(name, walk) {
   }
 }
 
+/** Says what was on screen, in the log and in [file] when given. */
+function sayOnScreen(file) {
+  const lines = onScreen();
+  for (const line of lines) say(`      ${line}`);
+  if (file) writeFileSync(join(out, file), `${lines.join('\n')}\n`);
+  return lines;
+}
+
+/** What the smoke start found, read by the walk: { ok, why, seconds, onScreen, dialogs } */
+const SMOKE = join(out, 'smoke.json');
+
+/**
+ * The smoke start, right after the install: starts the app once and waits up to 60 s for its sign-in screen (closing
+ * another app's system dialog as the walk does). Whatever happens it says what is on screen. If the app did not
+ * start, it says so in one line, and the walk that follows does not run.
+ */
+async function smokeStart() {
+  mkdirSync(out, { recursive: true });
+  theme = 'light';
+  segmentNow = 'smoke start';
+  const started = Date.now();
+  let why = '';
+  say('smoke start:');
+  try {
+    shell('am', 'force-stop', PACKAGE);
+    shell('cmd', 'uimode', 'night', 'no');
+    await sleep(800);
+    say(`    ${shell('am', 'start', '-W', '-n', `${PACKAGE}/.MainActivity`).trim().split('\n').map((l) => l.trim()).join('; ')}`);
+    await byId('signin_screen', 60_000);
+  } catch (error) {
+    why = String(error?.message ?? error).split('\n')[0];
+  }
+  const seconds = Math.round((Date.now() - started) / 1000);
+  say(why ? `    the app did not start in ${seconds} s: ${why}. On screen:` : `    the sign-in screen showed after ${seconds} s. On screen:`);
+  const lines = sayOnScreen('smoke.txt');
+  writeFileSync(SMOKE, JSON.stringify({ ok: !why, why, seconds, onScreen: lines, dialogs }, null, 2));
+  if (why) {
+    // one line the job's annotations show: the walk after this does not run
+    console.log(`::error title=The app did not start::${why} (${lines.find((l) => l.startsWith('focused window')) ?? ''})`);
+  }
+  return why ? 1 : 0;
+}
+
+if (process.argv.includes('--smoke')) {
+  let code = 1;
+  try {
+    code = await smokeStart();
+  } finally {
+    try {
+      shell('am', 'force-stop', PACKAGE);
+    } catch {
+      // the device is gone; smoke.json says so
+    }
+  }
+  process.exit(code);
+}
+
+/** The smoke start's result, if it ran: a failed one means the walk does not run. */
+let smoke;
+try {
+  smoke = JSON.parse(readFileSync(SMOKE, 'utf8'));
+  dialogs.push(...(smoke.dialogs ?? []));
+} catch {
+  smoke = undefined;
+}
+
 const problems = planProblems();
 if (problems.length) {
   console.error(`The walk's plan does not match the spec:\n${problems.join('\n')}`);
@@ -952,19 +1154,23 @@ try {
     say(`${theme}:`);
     for (const [name, walk] of SEGMENTS) {
       say(`  ${name}`);
-      const why = Date.now() - walkStarted > WALK_BUDGET_MS
-        ? `not started: the walk had used its ${WALK_BUDGET_MS / 60_000} minutes`
-        : await runSegment(name, walk);
+      const why = smoke && !smoke.ok
+        ? `not started: the app did not start (the smoke start: ${smoke.why})`
+        : Date.now() - walkStarted > WALK_BUDGET_MS
+          ? `not started: the walk had used its ${WALK_BUDGET_MS / 60_000} minutes`
+          : await runSegment(name, walk);
       if (!why) continue;
       stopped[theme][name] = why;
       say(`    STOPPED: ${why}`);
       if (deviceGone || why.startsWith('not started')) continue;
+      // what was on screen when it stopped, raw: the picture, what the device says, and the tree
       try {
         mkdirSync(join(out, 'failures'), { recursive: true });
         const file = `${theme}-${name.replaceAll(/[^a-z0-9]+/gi, '-')}`;
         writeFileSync(join(out, 'failures', `${file}.png`), adb('exec-out', 'screencap', '-p'));
-        dump();
-        writeFileSync(join(out, 'failures', `${file}.xml`), lastXml);
+        say('    On screen:');
+        sayOnScreen(join('failures', `${file}.txt`));
+        writeFileSync(join(out, 'failures', `${file}.xml`), dumpOnce());
       } catch {
         // the device went with the segment; the report still says what stopped
       }
