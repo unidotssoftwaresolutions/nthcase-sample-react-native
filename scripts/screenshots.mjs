@@ -719,7 +719,9 @@ async function settings() {
   await coldStart();
   await signIn();
   await tapId('nav_settings');
-  await byId('settings_version');
+  // the top of the page, as every round's picture shows it. settings_version is the page's last line, below the
+  // fold on a 2400 px screen (run 41787374730 waited for it here, unscrolled, and stopped): see() scrolls to it.
+  await byId('settings_account_email');
   await capture('22-settings');
   await see('settings');
   await tap(await scrollTo('settings_reset'));
