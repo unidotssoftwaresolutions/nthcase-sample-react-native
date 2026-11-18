@@ -917,8 +917,38 @@ async function theLobby() {
   await tapId('lobby_pager_shown');
 }
 
-/** What the touch log said after each injected swipe: { theme, across, ms, log, opened, first } */
+/** What the touch log said after each injected swipe: { theme, across, ms, log, opened, first, next } */
 const observations = [];
+
+/** Waits for the tree to pass [test] (all its nodes), reading it again every 400 ms. */
+async function until(test, what, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    if (test(dump())) return;
+    if (Date.now() > end) throw new Error(`not on screen: ${what}`);
+    await sleep(400);
+  }
+}
+
+/**
+ * Taps [id] and waits 3 s for [done]. Returns what that first tap did. If it did nothing, it taps once more, and that
+ * one must work.
+ *
+ * Why the first tap can do nothing: a tap waits 300 ms for a second one, and the second swipe starts 263 ms after the
+ * first. So the panel opens, and the tile or banner unmounts, under a finger that is down. Fabric drops the touch end
+ * aimed at a view it has deleted (SurfaceMountingManager.dispatchEvent: "Unable to invoke event"), so JavaScript
+ * never hears that finger lift, and React keeps the deleted Pressable as the responder. The next touch then asks only
+ * from the common ancestor up who wants to be the responder (ReactFabric's ResponderEventPlugin), so the button under
+ * it is never asked, and the tap goes to the dead Pressable. That touch's own end clears the responder: the tap after
+ * it works. Release run 44323859490 stopped here, the promo still open, in both themes.
+ */
+async function tapAfterTheSwipe(id, done, what) {
+  await tapId(id);
+  if (await shows(until(done, what, 3000))) return `${id}: it took`;
+  await tapId(id);
+  await until(done, `${what}, on a second tap`, 5000);
+  return `${id}: **did nothing**; the second tap did`;
+}
 
 /**
  * A vertical swipe across a scroller, down then 263 ms later up, through its centre, from 10 % to 90 % of its height:
@@ -926,10 +956,8 @@ const observations = [];
  * as fast as it can for the given time, where UiScrollable makes 55 steps. So this is an observation, not a check.
  */
 async function injectedSwipe(across, scrollerId, ms) {
-  const nodes = dump();
-  const node = nodes.find((n) => n.id === scrollerId);
-  if (!node) throw new Error(`not on screen: ${scrollerId}`);
-  const first = nodes.find((n) => n.scrollable)?.id || '(none)';
+  const node = await find((n) => n.id === scrollerId, scrollerId);
+  const first = lastNodes.find((n) => n.scrollable)?.id || '(none)';
   const x = String(Math.round(node.x));
   const top = String(Math.round(node.y1 + 0.1 * node.h));
   const bottom = String(Math.round(node.y2 - 0.1 * node.h));
@@ -938,15 +966,21 @@ async function injectedSwipe(across, scrollerId, ms) {
   const after = dump();
   const log = (logNode(after)?.text ?? '(no log in the tree)').replaceAll('\n', ' / ');
   const opened = ['lobby_sheet', 'lobby_detail', 'lobby_promo'].filter((id) => after.some((n) => n.id === id)).join(', ') || 'nothing';
-  observations.push({ theme, across, ms, log, opened, first });
+  const seen = { theme, across, ms, log, opened, first, next: '' };
+  observations.push(seen);
   say(`    OBSERVED ${across}, ${ms} ms a swipe (first scrollable: ${first}): the log says "${log}"; open: ${opened}`);
-  // back to the Lobby as it was
+  // back to the Lobby as it was, saying what the first tap after the swipe did
   if (after.some((n) => n.id === 'lobby_sheet')) {
     shell('input', 'keyevent', 'KEYCODE_BACK');
-    await sleep(700);
+    await until((ns) => !ns.some((n) => n.id === 'lobby_sheet'), 'the Lobby, the sheet closed by Back', 5000);
   }
-  for (const back of ['lobby_detail_back', 'lobby_promo_back']) if (dump().some((n) => n.id === back)) await tapId(back);
-  await tapId('lobby_touch_reset');
+  const panel = ['lobby_detail', 'lobby_promo'].find((id) => dump().some((n) => n.id === id));
+  const taps = [];
+  if (panel) taps.push(await tapAfterTheSwipe(`${panel}_back`, (ns) => !ns.some((n) => n.id === panel), `the Lobby, ${panel} closed`));
+  const empty = logNode(lastNodes)?.text === 'Nothing touched';
+  taps.push(`${await tapAfterTheSwipe('lobby_touch_reset', (ns) => logNode(ns)?.text === 'Nothing touched', 'the touch log, reset')}${empty ? ' (the log was empty already)' : ''}`);
+  seen.next = taps.join('; ');
+  say(`    THE TAPS AFTER IT: ${seen.next}`);
 }
 
 async function lobbySwipes() {
@@ -1063,7 +1097,13 @@ function reports() {
     'Two `input swipe`s through the scroller\'s centre, from 10 % to 90 % of its height and back 263 ms later: the shape of UiScrollable\'s two swipes in scrollIntoView, not its exact steps. What the touch log said after them:',
     '',
     ...(observations.length
-      ? ['| Theme | Across | A swipe | First scrollable | The touch log | Open after |', '| --- | --- | --- | --- | --- | --- |', ...observations.map((o) => `| ${o.theme} | ${o.across} | ${o.ms} ms | \`${o.first}\` | ${o.log} | ${o.opened} |`)]
+      ? [
+        '| Theme | Across | A swipe | First scrollable | The touch log | Open after | The taps after it |',
+        '| --- | --- | --- | --- | --- | --- | --- |',
+        ...observations.map((o) => `| ${o.theme} | ${o.across} | ${o.ms} ms | \`${o.first}\` | ${o.log} | ${o.opened} | ${o.next || '(the walk stopped before them)'} |`),
+        '',
+        'A tap that **did nothing** right after a swipe that opened a panel is React Native\'s, not the walk\'s: see `tapAfterTheSwipe` in `scripts/screenshots.mjs`.',
+      ]
       : ['None ran.']),
     '',
     '## The device',

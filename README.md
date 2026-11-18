@@ -184,6 +184,14 @@ long press, because they keep the long press while the finger stays inside the v
 UiScrollable's own swipe into `Pressable` and shows it; the CI device suite injects a swipe on the emulator and records
 what the log says.
 
+**The tap after it can do nothing (Android).** The second swipe starts 263 ms after the first, before the 300 ms tap
+fires. So the promo or the detail opens, and the banner or tile unmounts, under a finger that is down. React Native's
+Android renderer drops the touch end aimed at a view it has deleted, so JavaScript never hears that finger lift and
+keeps the deleted `Pressable` as the responder. The next tap anywhere in the app goes to it and does nothing; the tap
+after that works. The emulator showed it in the first release run: the walk's tap on "Back to the lobby" did nothing,
+and its tap on Reset worked. The walk now says, after each injected swipe, what the taps after it did. This is read
+from React Native's sources and fits that run; the next run's `walk.md` shows it directly.
+
 ## How it differs from the native apps
 
 - **The Lobby is built once.** The native Android and iOS apps build it twice, the second time with their classic
