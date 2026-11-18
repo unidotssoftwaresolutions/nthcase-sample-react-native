@@ -1,6 +1,6 @@
 # Every check. build.yml and release.yml call this workflow; it never runs on its own.
 #
-#   the fast checks, on every run     test: typecheck, Jest, expo-doctor, the walk's plan (ubuntu)
+#   the fast checks, on every run     test: typecheck, Jest, expo-doctor, Expo's versions, the walk's plan (ubuntu)
 #                                     android: the release-built, debug-signed .apk (ubuntu)
 #                                     ios: the zipped simulator .app (macos: only a Mac builds for the iOS Simulator)
 #   the device suite, when asked      screenshots: every screen, light and dark, on an Android emulator, with the ids
@@ -60,10 +60,21 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 10
         run: npm test -- --ci
+      # The doctor's version check asks Expo's servers what each SDK package should be on the day it runs, so an Expo
+      # patch release turned a push that changed nothing red (run 44312162058). The doctor's own setting switches that
+      # one check off here; every other doctor check still fails the build. The next step runs the same check itself.
       - name: expo-doctor
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 5
+        env:
+          EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK: "1"
         run: npx --yes expo-doctor@1.21.6
+      # The doctor's version check: a newer Expo patch release is a warning on the run (fix it with
+      # `npx expo install --fix`); a major or minor drift, a missing package or a check that cannot run fails it.
+      - name: Expo versions (a patch release only warns)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 5
+        run: node scripts/expo-versions.mjs
       - name: The screenshot walk names a state for every spec id
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 2

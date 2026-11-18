@@ -243,7 +243,7 @@ assets/art/              PNGs at 1x, 2x and 3x, drawn from art/ by scripts/deriv
 assets/launcher/         the app icon and Android's adaptive and notification icons, drawn from art/launcher.svg
 assets/web/              care-guide.html, the web view's page
 plugins/                 a local config plugin: Gradle limits
-scripts/                 derive-assets, the iOS simulator build, the CI screenshot driver
+scripts/                 derive-assets, the iOS simulator build, the CI screenshot driver, CI's Expo version check
 __tests__/ test/         Jest tests and their helpers
 art/  nthcase/  SPEC.md  the shared sources, unchanged
 docs/screenshots/        every screen, light and dark (from CI)
@@ -253,7 +253,9 @@ docs/screenshots/        every screen, light and dark (from CI)
 
 A push to `main` or a pull request runs the fast checks, with no emulator and no simulator: typecheck, Jest,
 `expo-doctor` and the walk's plan, the `.apk` on `ubuntu-latest` and the zipped simulator `.app` on `macos-latest`, side
-by side, in about 20 to 25 minutes (the two native builds). A push that changes only `README.md`, `CONTRIBUTING.md`,
+by side, in about 20 to 25 minutes (the two native builds). The doctor's version check runs as its own step,
+`scripts/expo-versions.mjs`: when Expo publishes a newer patch release of an SDK package, the run shows a warning and
+stays green (bring it up with `npx expo install --fix`); a major or minor drift, or a missing package, still fails it. A push that changes only `README.md`, `CONTRIBUTING.md`,
 `SECURITY.md`, `LICENSE`, `NOTICE` or `docs/screenshots/` starts nothing. The device suite, the `screenshots` job on an
 Android emulator (every screen, light and dark, the ids, the keyboard-up taps, and on the Lobby the tree's first
 scrollable with the pager on and off and Saved's late arrival, about 25 minutes more), runs on "Run
