@@ -26,6 +26,10 @@ export type AppState = {
   themeMode: ThemeMode;
   /** A deep link that arrived before sign-in; opened right after it. */
   pendingItemId: string | null;
+  /** The Lobby's "Saved appears after", in seconds: kept until the app closes (SPEC.md §5). */
+  lobbySavedDelay: number;
+  /** The Lobby's "Show the pager": kept until the app closes, like the delay. */
+  lobbyPagerShown: boolean;
 };
 
 const COLD_START: AppState = {
@@ -37,6 +41,8 @@ const COLD_START: AppState = {
   orderUpdates: false,
   themeMode: 'system',
   pendingItemId: null,
+  lobbySavedDelay: 0,
+  lobbyPagerShown: true,
 };
 
 /**
@@ -133,6 +139,12 @@ export const actions = {
   },
   setPendingItemId(id: string | null) {
     set({ pendingItemId: id });
+  },
+  setLobbySavedDelay(seconds: number) {
+    set({ lobbySavedDelay: seconds });
+  },
+  setLobbyPagerShown(shown: boolean) {
+    set({ lobbyPagerShown: shown });
   },
   /** Back to a cold start. Tests call it between cases. */
   reset() {

@@ -16,7 +16,8 @@ import { join } from 'node:path';
 
 import { CATEGORIES } from '../src/data/catalog';
 import { actions } from '../src/data/store';
-import { TEMPLATE_PATTERNS, TemplateIds, TestIds } from '../src/testIds';
+import { Lobby } from '../src/data/lobby';
+import { NOT_BUILT, TEMPLATE_PATTERNS, TemplateIds, TestIds } from '../src/testIds';
 import { launch, launchSignedIn, signIn, tap } from '../test/app';
 import { allIds, idsHiddenByAnAncestor, screenShowing, visibleIds, type HostNode } from '../test/tree';
 
@@ -40,18 +41,25 @@ async function state(name: string, expected: string[]) {
 }
 
 const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
-const ofScreen = (s: string) => spec.ids.filter((e) => e.screen === s && !e.id.includes('{')).map((e) => e.id);
+const built = (id: string) => !(NOT_BUILT as readonly string[]).includes(id);
+const ofScreen = (s: string) => spec.ids.filter((e) => e.screen === s && !e.id.includes('{') && built(e.id)).map((e) => e.id);
 
 describe('the app’s ids are the spec’s', () => {
-  it('lists exactly the JSON’s native ids, templates included', () => {
+  it('lists exactly the JSON’s native ids, templates included, but lab_lobby_views', () => {
     const app = [...Object.values(TestIds), ...TEMPLATE_PATTERNS].sort();
-    const json = spec.ids.map((e) => e.id).filter((id) => !id.startsWith('web_')).sort();
+    const json = spec.ids.map((e) => e.id).filter((id) => !id.startsWith('web_') && built(id)).sort();
     expect(app).toEqual(json);
-    expect(spec.ids).toHaveLength(147);
+    expect(spec.ids).toHaveLength(193);
+    // the one id this app leaves out is the second Lobby's, which only Android and iOS build (SPEC.md §5, §7)
+    expect(NOT_BUILT).toEqual(['lab_lobby_views']);
+    expect(spec.ids.find((e) => e.id === 'lab_lobby_views')?.when).toBe('Android and iOS only');
     for (const id of app) expect(id.replace(/\{\w+\}/g, 'x')).toMatch(new RegExp(spec.pattern));
     // the templates expand as the app writes them
     expect(TemplateIds.shopItem(7)).toBe('shop_item_7');
     expect(TemplateIds.formCategoryOption('garden')).toBe('form_category_option_garden');
+    expect(TemplateIds.lobbyBoardCell(13, 18)).toBe('lobby_board_cell_m18');
+    expect(TemplateIds.lobbyRowTile(3, 15)).toBe('lobby_row_3_tile_15');
+    expect(TemplateIds.lobbySavedDelay(12)).toBe('lobby_saved_delay_12');
   });
 
   it('puts every web_* id on the page as both id and data-testid', () => {
@@ -193,18 +201,64 @@ describe('every id on its screen, in the state the spec names', () => {
     await state('item, unknown id', [TestIds.ITEM_SCREEN, TestIds.ITEM_NOT_FOUND, TestIds.ITEM_NOT_FOUND_ACTION]);
   });
 
+  it('the lobby: open, the pager off, the panels and the quick sheet', async () => {
+    await launchSignedIn();
+    await tap(TestIds.NAV_LAB);
+    await tap(TestIds.LAB_LOBBY);
+    await screen.findByTestId(TestIds.LOBBY_SCREEN);
+    const lobby = ofScreen('lobby');
+    const panels: string[] = [TestIds.LOBBY_SAVED_SCREEN, TestIds.LOBBY_DETAIL, TestIds.LOBBY_DETAIL_BACK, TestIds.LOBBY_PROMO, TestIds.LOBBY_PROMO_BACK];
+    const sheet = lobby.filter((id) => id.startsWith('lobby_sheet'));
+    const atOpen = lobby.filter((id) => !panels.includes(id) && !sheet.includes(id));
+    // every instance of every template: the lists render all their items, so the React tree holds them all
+    const instances = [
+      ...Lobby.DELAYS.map(TemplateIds.lobbySavedDelay),
+      ...range(Lobby.BANNERS).map(TemplateIds.lobbyBanner),
+      ...range(Lobby.TOP_TILES).map(TemplateIds.lobbyTopRowTile),
+      ...range(Lobby.chips.length).map(TemplateIds.lobbyChip),
+      ...range(Lobby.ROWS).flatMap((n) => [TemplateIds.lobbyRow(n), TemplateIds.lobbyRowPosition(n), ...range(Lobby.TILES).map((m) => TemplateIds.lobbyRowTile(n, m))]),
+      ...range(Lobby.GRID_CELLS).map(TemplateIds.lobbyGridCell),
+      ...range(Lobby.INNER_LINES).map(TemplateIds.lobbyInnerRow),
+      ...range(Lobby.BOARD).flatMap((col) => range(Lobby.BOARD).map((row) => TemplateIds.lobbyBoardCell(col, row))),
+    ];
+    expect(instances).toHaveLength(5 + 5 + 10 + 12 + 4 * 22 + 12 + 30 + 676);
+    await state('lobby', [...atOpen, ...instances]);
+
+    await fireEvent(screen.getByTestId(TestIds.LOBBY_PAGER_SHOWN), 'valueChange', false);
+    await state('lobby, the pager off', atOpen.filter((id) => !id.startsWith('lobby_pager') || id === TestIds.LOBBY_PAGER_SHOWN));
+    await fireEvent(screen.getByTestId(TestIds.LOBBY_PAGER_SHOWN), 'valueChange', true);
+
+    await fireEvent.press(screen.getByTestId(TemplateIds.lobbyRowTile(1, 1)));
+    await act(() => jest.advanceTimersByTime(300));
+    await state('lobby, detail', [TestIds.LOBBY_DETAIL, TestIds.LOBBY_DETAIL_BACK]);
+    await tap(TestIds.LOBBY_DETAIL_BACK);
+    await fireEvent.press(screen.getByTestId(TemplateIds.lobbyBanner(1)));
+    await act(() => jest.advanceTimersByTime(300));
+    await state('lobby, promo', [TestIds.LOBBY_PROMO, TestIds.LOBBY_PROMO_BACK]);
+    await tap(TestIds.LOBBY_PROMO_BACK);
+    await tap(TestIds.LOBBY_BAR_SAVED);
+    await state('lobby, saved', [TestIds.LOBBY_SAVED_SCREEN]);
+    await tap(TestIds.LOBBY_BAR_HOME);
+    await fireEvent(screen.getByTestId(TemplateIds.lobbyTopRowTile(1)), 'longPress');
+    await state('lobby, quick sheet', sheet);
+    await tap(TestIds.LOBBY_SHEET_RATE);
+  });
+
   it('has seen every id in the JSON', () => {
     const expand = (id: string): string[] => {
       if (id.includes('{id}')) return [id.replace('{id}', id.startsWith('shop_item') ? '1' : '7')];
       if (id.includes('{key}')) return CATEGORIES.map((c) => id.replace('{key}', c.key));
-      if (id.includes('{n}')) return [id.replace('{n}', '1')];
-      return [id];
+      if (id.includes('{s}')) return Lobby.DELAYS.map((s) => id.replace('{s}', String(s)));
+      if (id.includes('{col}{row}')) return [id.replace('{col}{row}', 'a1'), id.replace('{col}{row}', 'z26')];
+      return [id.replace('{n}', '1').replace('{m}', '1')];
     };
-    const native = spec.ids.filter((e) => !e.id.startsWith('web_')).flatMap((e) => expand(e.id));
+    const native = spec.ids.filter((e) => !e.id.startsWith('web_') && built(e.id)).flatMap((e) => expand(e.id));
     expect(native.filter((id) => !seen.has(id))).toEqual([]);
     // and nothing the spec does not name
     const known = (id: string) =>
-      native.includes(id) || /^(shop_item|cart_line(_(decrease|qty|increase|remove|total))?)_\d+$|^(slow_slot|orders_row)_\d+$/.test(id);
+      native.includes(id) ||
+      /^(shop_item|cart_line(_(decrease|qty|increase|remove|total))?)_\d+$|^(slow_slot|orders_row)_\d+$/.test(id) ||
+      /^lobby_(banner|top_row_tile|chip|row|grid_cell|inner_row)_\d+$|^lobby_row_\d+_(position|tile_\d+)$|^lobby_board_cell_[a-z]\d+$/.test(id);
     expect([...seen].filter((id) => !known(id))).toEqual([]);
   });
 });

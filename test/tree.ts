@@ -83,3 +83,20 @@ export function screenShowing(text: string, nodes: HostNode[] = hostRoots()): Ho
   });
   return best;
 }
+
+/**
+ * The scroll views on the screen in front, in the order a depth-first walk meets them: the order in which
+ * UiAutomator's `new UiSelector().scrollable(true)` meets nodes, since React Native mounts each child into its
+ * parent's platform view in render order. A host scroll view is `RCTScrollView` here, vertical or horizontal (on a
+ * phone, Android makes a horizontal one an `android.widget.HorizontalScrollView`). Screens under a navigation-hidden
+ * ancestor are left out; on Android the native stack removes them from the window (react-native-screens'
+ * ScreenStack.onUpdate), and CI's walk checks it in UiAutomator's own tree.
+ */
+export function scrollablesInFront(nodes: HostNode[] = hostRoots()): { id: string; horizontal: boolean }[] {
+  const found: { id: string; horizontal: boolean }[] = [];
+  walk(nodes, (n, ancestors) => {
+    if (n.type !== 'RCTScrollView' || ancestors.some(offScreen) || offScreen(n)) return;
+    found.push({ id: typeof n.props.testID === 'string' ? n.props.testID : '(no id)', horizontal: n.props.horizontal === true });
+  });
+  return found;
+}

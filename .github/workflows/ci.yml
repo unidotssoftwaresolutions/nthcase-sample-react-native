@@ -4,7 +4,7 @@
 #                                     android: the release-built, debug-signed .apk (ubuntu)
 #                                     ios: the zipped simulator .app (macos: only a Mac builds for the iOS Simulator)
 #   the device suite, when asked      screenshots: every screen, light and dark, on an Android emulator, with the ids
-#   (`devices: true`)                 in UiAutomator's tree and the keyboard-up taps
+#   (`devices: true`)                 in UiAutomator's tree, the keyboard-up taps, and the Lobby's tree order
 #
 # build.yml asks for the device suite on "Run workflow" and on the monthly schedule; release.yml always does. On a push
 # or a pull request the screenshots job is skipped: no emulator starts.
@@ -171,7 +171,7 @@ jobs:
     needs: android
     if: ${{ inputs.devices }}
     runs-on: ubuntu-latest
-    # the walk reads the tree in 29 states per theme, from 11 cold starts each: about twice the first walk's work. It
+    # the walk reads the tree in 35 states per theme, from 13 cold starts each (the Lobby's two segments are 1.1's). It
     # starts no segment after 50 minutes and waits at most 5 for a lost device, so its reports are written before this.
     timeout-minutes: 75
     steps:

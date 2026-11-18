@@ -66,6 +66,7 @@ export const TestIds = {
   LAB_SLOW: 'lab_slow',
   LAB_ORDERS: 'lab_orders',
   LAB_GIFT_CARDS: 'lab_gift_cards',
+  LAB_LOBBY: 'lab_lobby',
 
   FORM_SCREEN: 'form_screen',
   FORM_NAME: 'form_name',
@@ -143,9 +144,55 @@ export const TestIds = {
   SETTINGS_RESET_CONFIRM: 'settings_reset_confirm',
   SETTINGS_RESET_CANCEL: 'settings_reset_cancel',
   SETTINGS_VERSION: 'settings_version',
+
+  LOBBY_SCREEN: 'lobby_screen',
+  LOBBY_TOUCH_LOG: 'lobby_touch_log',
+  LOBBY_TOUCH_COUNT: 'lobby_touch_count',
+  LOBBY_TOUCH_RESET: 'lobby_touch_reset',
+  LOBBY_SAVED_DELAY: 'lobby_saved_delay',
+  LOBBY_PAGER_SHOWN: 'lobby_pager_shown',
+  LOBBY_PAGER: 'lobby_pager',
+  LOBBY_PAGER_POSITION: 'lobby_pager_position',
+  LOBBY_PAGER_AUTO: 'lobby_pager_auto',
+  LOBBY_TOP_ROW_POSITION: 'lobby_top_row_position',
+  LOBBY_TOP_ROW: 'lobby_top_row',
+  LOBBY_PAGE: 'lobby_page',
+  LOBBY_CHIPS: 'lobby_chips',
+  LOBBY_GRID: 'lobby_grid',
+  LOBBY_INNER_LIST: 'lobby_inner_list',
+  LOBBY_BOARD: 'lobby_board',
+  LOBBY_BOARD_POSITION: 'lobby_board_position',
+  LOBBY_FOOTER: 'lobby_footer',
+  LOBBY_BAR: 'lobby_bar',
+  LOBBY_BAR_HOME: 'lobby_bar_home',
+  LOBBY_BAR_LIVE: 'lobby_bar_live',
+  LOBBY_BAR_SAVED: 'lobby_bar_saved',
+  LOBBY_BAR_OFFERS: 'lobby_bar_offers',
+  LOBBY_SAVED_SCREEN: 'lobby_saved_screen',
+  LOBBY_DETAIL: 'lobby_detail',
+  LOBBY_DETAIL_BACK: 'lobby_detail_back',
+  LOBBY_PROMO: 'lobby_promo',
+  LOBBY_PROMO_BACK: 'lobby_promo_back',
+  LOBBY_SHEET: 'lobby_sheet',
+  LOBBY_SHEET_TITLE: 'lobby_sheet_title',
+  LOBBY_SHEET_OPEN: 'lobby_sheet_open',
+  LOBBY_SHEET_PREVIEW: 'lobby_sheet_preview',
+  LOBBY_SHEET_SAVED: 'lobby_sheet_saved',
+  LOBBY_SHEET_RATE: 'lobby_sheet_rate',
 } as const;
 
-/** The templated ids: `{id}` is an item number, `{n}` a slot or order number, `{key}` an aisle key. */
+/**
+ * The spec ids this app does not build. `lab_lobby_views` opens the Lobby built a second time with the platform's
+ * classic view toolkit (Android Views, iOS UIKit); React Native has one toolkit, so it builds the Lobby once (SPEC.md
+ * §5 and §12, as for Settings).
+ */
+export const NOT_BUILT = ['lab_lobby_views'] as const;
+
+/**
+ * The templated ids: `{id}` is an item number, `{n}` a slot or order number, `{key}` an aisle key. On the Lobby, `{n}`
+ * numbers banners, chips, rows, grid cells and lines, `{m}` a tile in its row, `{s}` a delay in seconds, and
+ * `{col}{row}` a board cell.
+ */
 export const TemplateIds = {
   shopItem: (id: number) => `shop_item_${id}`,
   cartLine: (id: number) => `cart_line_${id}`,
@@ -157,6 +204,17 @@ export const TemplateIds = {
   formCategoryOption: (key: string) => `form_category_option_${key}`,
   slowSlot: (n: number) => `slow_slot_${n}`,
   ordersRow: (n: number) => `orders_row_${n}`,
+  lobbySavedDelay: (s: number) => `lobby_saved_delay_${s}`,
+  lobbyBanner: (n: number) => `lobby_banner_${n}`,
+  lobbyTopRowTile: (m: number) => `lobby_top_row_tile_${m}`,
+  lobbyChip: (n: number) => `lobby_chip_${n}`,
+  lobbyRow: (n: number) => `lobby_row_${n}`,
+  lobbyRowPosition: (n: number) => `lobby_row_${n}_position`,
+  lobbyRowTile: (n: number, m: number) => `lobby_row_${n}_tile_${m}`,
+  lobbyGridCell: (n: number) => `lobby_grid_cell_${n}`,
+  lobbyInnerRow: (n: number) => `lobby_inner_row_${n}`,
+  /** `lobby_board_cell_m18`: the column's letter in lower case, then the row's number. */
+  lobbyBoardCell: (col: number, row: number) => `lobby_board_cell_${String.fromCharCode(96 + col)}${row}`,
 } as const;
 
 /** The same templates as the JSON writes them, so a test can compare the two lists. */
@@ -171,4 +229,14 @@ export const TEMPLATE_PATTERNS = [
   'form_category_option_{key}',
   'slow_slot_{n}',
   'orders_row_{n}',
+  'lobby_saved_delay_{s}',
+  'lobby_banner_{n}',
+  'lobby_top_row_tile_{m}',
+  'lobby_chip_{n}',
+  'lobby_row_{n}',
+  'lobby_row_{n}_position',
+  'lobby_row_{n}_tile_{m}',
+  'lobby_grid_cell_{n}',
+  'lobby_inner_row_{n}',
+  'lobby_board_cell_{col}{row}',
 ] as const;

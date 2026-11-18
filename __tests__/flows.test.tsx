@@ -500,7 +500,7 @@ describe('09 · settings, the notification prompt and a confirm dialog', () => {
     expect(screen.getByText("You stay signed in. This can't be undone.")).toBeTruthy();
     await tap(TestIds.SETTINGS_RESET_CANCEL);
     expect(screen.queryByText('Empty the cart and orders?')).toBeNull();
-    expect(byId(TestIds.SETTINGS_VERSION)).toHaveTextContent('Mossgrove 1.0.0 · spec 1.0 · a sample app for NthCase');
+    expect(byId(TestIds.SETTINGS_VERSION)).toHaveTextContent('Mossgrove 1.1.0 · spec 1.1 · a sample app for NthCase');
 
     await tap(TestIds.SETTINGS_SIGN_OUT);
     expect(await screen.findByText('Test account')).toBeTruthy();

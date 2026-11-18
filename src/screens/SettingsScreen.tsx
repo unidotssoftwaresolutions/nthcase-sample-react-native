@@ -9,7 +9,7 @@ import { Button, Dialog, DialogActions, Screen, TopBar } from '../ui/components'
 import { useSnack } from '../ui/snackbar';
 import { MONOSPACE, Space, Type, useTheme } from '../ui/theme';
 
-export const SPEC_VERSION = '1.0';
+export const SPEC_VERSION = '1.1';
 export const NOTIFICATIONS_NOT_ALLOWED = 'Not allowed. Turn this on to be asked.';
 export const NOTIFICATIONS_OFF = 'Off';
 export const NOTIFICATIONS_ON = "On: we'll tell you when an order is placed.";
@@ -61,7 +61,7 @@ export function SettingsScreen({ onOrders }: { onOrders: () => void }) {
   }
 
   const status = !allowed ? NOTIFICATIONS_NOT_ALLOWED : orderUpdates ? NOTIFICATIONS_ON : NOTIFICATIONS_OFF;
-  const version = Constants.expoConfig?.version ?? '1.0.0';
+  const version = Constants.expoConfig?.version ?? '1.1.0';
 
   return (
     <Screen>

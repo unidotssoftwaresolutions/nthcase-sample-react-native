@@ -4,7 +4,7 @@ import { TestIds } from '../testIds';
 import { Icon, Screen, TopBar } from '../ui/components';
 import { Space, Type, useTheme } from '../ui/theme';
 
-export type BenchRoute = '/form' | '/gestures' | '/webview' | '/slow' | '/orders' | '/gift-cards';
+export type BenchRoute = '/form' | '/gestures' | '/webview' | '/slow' | '/orders' | '/gift-cards' | '/lobby';
 
 const BENCHES: readonly { id: string; route: BenchRoute; title: string; body: string }[] = [
   { id: TestIds.LAB_FORM, route: '/form', title: 'Join the club', body: 'A form: text, email, number, password, picker, date, switch, slider, checkbox' },
@@ -13,6 +13,7 @@ const BENCHES: readonly { id: string; route: BenchRoute; title: string; body: st
   { id: TestIds.LAB_SLOW, route: '/slow', title: 'Delivery slots', body: 'Loads for 3 seconds, then shows its content' },
   { id: TestIds.LAB_ORDERS, route: '/orders', title: 'Orders', body: 'An empty state, and an error state with retry' },
   { id: TestIds.LAB_GIFT_CARDS, route: '/gift-cards', title: 'Gift cards', body: 'No test ids at all: find things by their text' },
+  { id: TestIds.LAB_LOBBY, route: '/lobby', title: 'Lobby', body: 'A pager, rows, a grid, a list in the list, a board and a late bar item, with a touch log' },
 ];
 
 /** The Lab: Mossgrove's second cabinet, one drawer per test bench. It says plainly what each one is for. */

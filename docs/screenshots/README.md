@@ -1,7 +1,9 @@
 # Screenshots
 
-Every screen, light and dark, as `light/NN-name.png` and `dark/NN-name.png`, with the same 24 names in all five
-Mossgrove apps.
+Every screen, light and dark, as `light/NN-name.png` and `dark/NN-name.png`: round one's 24 names, the same in all five
+Mossgrove apps, and the Lobby's four (spec 1.1) under the Android app's numbers: `25-lobby`, `26-lobby-board`,
+`27-lobby-sheet` and `30-lobby-no-pager`. The Android app's 28, 29 and 31 show the Lobby it builds a second time with
+Android Views, which this app does not build.
 
 They are taken on an Android emulator in CI, never on a developer's machine: the `screenshots` job of
 [`.github/workflows/build.yml`](../../.github/workflows/build.yml) installs the built `.apk`, runs

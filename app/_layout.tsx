@@ -65,6 +65,7 @@ export default function RootLayout() {
             <Stack.Screen name="slow" />
             <Stack.Screen name="orders" />
             <Stack.Screen name="gift-cards" />
+            <Stack.Screen name="lobby" />
           </Stack.Protected>
         </Stack>
       </SnackbarProvider>

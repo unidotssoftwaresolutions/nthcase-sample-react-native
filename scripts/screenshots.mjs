@@ -6,7 +6,10 @@
 //      the tree Appium's UiAutomator2 driver reads -> build/screenshots/android-ids.md, and each tree under trees/
 //   3. plays the three taps SPEC.md §13 needs with the keyboard up (no hide-keyboard step): Sign in, Clear search,
 //      the form's Join, and Gift cards' Check balance
-//   4. writes what happened, step by step -> build/screenshots/walk.md
+//   4. on the Lobby (spec 1.1), checks in that same tree what Appium meets first: the pager is the first scrollable,
+//      with the pager off the Top 10 row is and no pager node is left, and Saved is absent until its delay; then it
+//      injects a vertical swipe across the first scrollable and records what the touch log says (an observation)
+//   5. writes what happened, step by step -> build/screenshots/walk.md
 //
 // The walk is cut into segments. Each starts from a cold start, so a segment that fails is reported and the next one
 // still runs: one run tells every miss. The script fails once, at the end, if any screen, id or check was missed.
@@ -45,7 +48,9 @@ const THEMES = ['light', 'dark'];
 
 // ---- what the walk must see ---------------------------------------------------------------------------------------
 
-const SPEC = JSON.parse(readFileSync(join(root, 'nthcase/test-ids.json'), 'utf8')).ids.filter((e) => !e.id.startsWith('web_'));
+/** The spec ids this app does not build: the second Lobby, which only Android and iOS build (src/testIds.ts). */
+const NOT_BUILT = new Set(['lab_lobby_views']);
+const SPEC = JSON.parse(readFileSync(join(root, 'nthcase/test-ids.json'), 'utf8')).ids.filter((e) => !e.id.startsWith('web_') && !NOT_BUILT.has(e.id));
 /** A spec id, or a template like shop_item_{id}, as a pattern over the ids the app writes. */
 const PATTERNS = SPEC.map((e) => ({ id: e.id, re: new RegExp(`^${e.id.replace(/\{\w+\}/g, '[a-z0-9]+')}$`) }));
 const specIdOf = (id) => PATTERNS.filter((p) => p.re.test(id)).map((p) => p.id);
@@ -53,12 +58,12 @@ const specIdOf = (id) => PATTERNS.filter((p) => p.re.test(id)).map((p) => p.id);
 /** The 3 s spinners. SPEC.md §13: a step on a device can outlast them, so a walk may miss them. */
 const TRANSIENT = new Set(['shop_loading', 'orders_loading', 'slow_loading']);
 
-/** Round one's 24 screens. */
+/** Round one's 24 screens, and the Lobby's four under the Android app's numbers (28, 29 and 31 are its Views Lobby). */
 const SHOTS = [
   '01-sign-in', '02-sign-in-error', '03-shop', '04-shop-search', '05-shop-no-match', '06-item', '07-item-snackbar',
   '08-cart', '09-cart-dialog', '10-cart-empty', '11-lab', '12-form-errors', '13-form-done', '14-gestures', '15-webview',
   '16-slow-loading', '17-slow-done', '18-orders', '19-orders-empty', '20-orders-error', '21-gift-cards', '22-settings',
-  '23-settings-dialog', '24-deep-link-unknown',
+  '23-settings-dialog', '24-deep-link-unknown', '25-lobby', '26-lobby-board', '27-lobby-sheet', '30-lobby-no-pager',
 ];
 
 /**
@@ -80,7 +85,7 @@ const PLAN = {
   'cart, dialog': { ids: ['dialog', 'dialog_title', 'dialog_text', 'dialog_confirm', 'dialog_dismiss'] },
   'cart, empty': { ids: ['cart_empty', 'cart_empty_action'] },
   orders: { ids: ['orders_screen', 'orders_list', 'orders_row_1'] },
-  lab: { ids: ['lab_screen', 'lab_form', 'lab_gestures', 'lab_webview', 'lab_slow', 'lab_orders', 'lab_gift_cards'] },
+  lab: { ids: ['lab_screen', 'lab_form', 'lab_gestures', 'lab_webview', 'lab_slow', 'lab_orders', 'lab_gift_cards', 'lab_lobby'] },
   form: {
     ids: ['form_screen', 'form_name', 'form_email', 'form_age', 'form_password', 'form_password_toggle', 'form_category', 'form_date', 'form_newsletter', 'form_budget', 'form_budget_value', 'form_terms', 'form_submit'],
     scroll: true,
@@ -111,6 +116,25 @@ const PLAN = {
   'shop, slow': { ids: ['shop_loading'] },
   'orders, slow': { ids: ['orders_loading'] },
   'item, unknown id': { ids: ['item_not_found', 'item_not_found_action'] },
+  // the Lobby, read down its page in the left gutter, clear of the inner list and the board (each scrolls on its own)
+  lobby: {
+    ids: [
+      'lobby_screen', 'lobby_touch_log', 'lobby_touch_count', 'lobby_touch_reset', 'lobby_saved_delay', 'lobby_saved_delay_0',
+      'lobby_saved_delay_3', 'lobby_saved_delay_6', 'lobby_saved_delay_12', 'lobby_saved_delay_20', 'lobby_pager_shown',
+      'lobby_pager', 'lobby_banner_1', 'lobby_pager_position', 'lobby_pager_auto', 'lobby_top_row_position', 'lobby_top_row',
+      'lobby_top_row_tile_1', 'lobby_page', 'lobby_chips', 'lobby_chip_1', 'lobby_row_1_position', 'lobby_row_1',
+      'lobby_row_1_tile_1', 'lobby_grid', 'lobby_grid_cell_1', 'lobby_inner_list', 'lobby_inner_row_1', 'lobby_board_position',
+      'lobby_board', 'lobby_board_cell_a1', 'lobby_footer', 'lobby_bar', 'lobby_bar_home', 'lobby_bar_live', 'lobby_bar_saved',
+      'lobby_bar_offers',
+    ],
+    scroll: true,
+    lane: 'edge',
+  },
+  'lobby, the pager off': { ids: ['lobby_top_row', 'lobby_top_row_position', 'lobby_page'] },
+  'lobby, detail': { ids: ['lobby_detail', 'lobby_detail_back'] },
+  'lobby, promo': { ids: ['lobby_promo', 'lobby_promo_back'] },
+  'lobby, saved': { ids: ['lobby_saved_screen'] },
+  'lobby, quick sheet': { ids: ['lobby_sheet', 'lobby_sheet_title', 'lobby_sheet_open', 'lobby_sheet_preview', 'lobby_sheet_saved', 'lobby_sheet_rate'] },
 };
 
 /** The plan names a state for every spec id, and nothing the spec does not name. */
@@ -132,7 +156,7 @@ function planProblems() {
     if (times !== 1) problems.push(`"${state}" is walked ${times} times by the segments, not once`);
   }
   for (const state of walked) if (!PLAN[state]) problems.push(`a segment walks "${state}", which the plan does not name`);
-  if (SPEC.length !== 138) problems.push(`the spec has ${SPEC.length} native ids, not 138`);
+  if (SPEC.length !== 183) problems.push(`the spec has ${SPEC.length} native ids this app builds, not 183`);
   return problems;
 }
 
@@ -797,6 +821,146 @@ async function deepLink() {
   await capture('24-deep-link-unknown');
 }
 
+// ---- the Lobby (spec 1.1) ----------------------------------------------------------------------------------------
+
+const PAGER_IDS = ['lobby_pager', 'lobby_pager_position', 'lobby_pager_auto'];
+/** The first scrollables in the tree, in UiAutomator's order (a parent before its children, siblings in order). */
+const firstScrollables = (nodes, n = 4) =>
+  nodes.filter((x) => x.scrollable).slice(0, n).map((x) => `${x.id || `(no id, ${x.cls.split('.').at(-1)})`} [y ${x.y1}–${x.y2}]`).join(' → ');
+const logNode = (nodes) => nodes.find((x) => x.id === 'lobby_touch_log');
+
+async function openLobby() {
+  await tapId('nav_lab');
+  await tap(await scrollTo('lab_lobby'));
+  await byId('lobby_touch_log');
+  // the push: until its transition ends, the Lab is still in the window under the Lobby
+  await sleep(1500);
+}
+
+/** A press held in place: `input swipe` from a point to itself, for 1 s. */
+async function longPress(node) {
+  const x = String(Math.round(node.x));
+  const y = String(Math.round(node.y));
+  shell('input', 'swipe', x, y, x, y, '1000');
+  await sleep(900);
+}
+
+async function theLobby() {
+  await coldStart();
+  await signIn();
+  await openLobby();
+  let nodes = dump();
+  const first = nodes.find((n) => n.scrollable);
+  check('Lobby: the pager is the first scrollable', first?.id === 'lobby_pager', `in UiAutomator's order: ${firstScrollables(nodes)}`);
+  await capture('25-lobby');
+  await see('lobby');
+
+  // the board, one cell tapped
+  await tap(await scrollTo('lobby_board_cell_e5', 'edge'));
+  await byTextPart('Tapped: E5 (board)', 3000);
+  await capture('26-lobby-board');
+  await scrollToTop('edge');
+
+  // a tile's long press: the quick sheet, a window of its own
+  await longPress(await byId('lobby_top_row_tile_1'));
+  await byId('lobby_sheet_title');
+  await see('lobby, quick sheet');
+  await capture('27-lobby-sheet');
+  await tapId('lobby_sheet_rate');
+  await byId('lobby_touch_log');
+
+  await tapId('lobby_top_row_tile_1');
+  await byId('lobby_detail_back');
+  await see('lobby, detail');
+  await tapId('lobby_detail_back');
+  await tapId('lobby_banner_1');
+  await byId('lobby_promo_back');
+  await see('lobby, promo');
+  await tapId('lobby_promo_back');
+  await tapId('lobby_bar_saved');
+  await byId('lobby_saved_screen');
+  await see('lobby, saved');
+  await tapId('lobby_bar_home');
+  await tapId('lobby_touch_reset');
+
+  // Saved comes 12 s after the choice, and is absent from the tree until then
+  await tapId('lobby_saved_delay_12');
+  const chosen = Date.now();
+  const barItems = (ns) => ns.filter((n) => /^lobby_bar_(home|live|saved|offers)$/.test(n.id)).map((n) => n.id.slice('lobby_bar_'.length));
+  nodes = dump();
+  const atOnce = barItems(nodes);
+  while (Date.now() - chosen < 9000) await sleep(500);
+  const at9 = barItems(dump());
+  while (Date.now() - chosen < 13_000) await sleep(500);
+  const at13 = barItems(dump());
+  check(
+    'Lobby: Saved is absent until its 12 s',
+    !atOnce.includes('saved') && atOnce.length === 3 && !at9.includes('saved') && at13.includes('saved'),
+    `bar items just after the choice: ${atOnce.join(', ')}; 9 s after it: ${at9.join(', ')}; 13 s after it: ${at13.join(', ')}`,
+  );
+  await tapId('lobby_saved_delay_0');
+
+  // the pager off: gone from the tree, and the Top 10 row first
+  await tapId('lobby_pager_shown');
+  await byId('lobby_top_row');
+  await sleep(500);
+  nodes = dump();
+  const left = nodes.filter((n) => PAGER_IDS.includes(n.id) || /^lobby_banner_\d+$/.test(n.id)).map((n) => n.id);
+  const firstOff = nodes.find((n) => n.scrollable);
+  check(
+    'Lobby, the pager off: no pager node, and the Top 10 row is the first scrollable',
+    left.length === 0 && firstOff?.id === 'lobby_top_row',
+    `pager nodes left: ${left.join(' ') || 'none'}; in UiAutomator's order: ${firstScrollables(nodes)}`,
+  );
+  await see('lobby, the pager off');
+  await capture('30-lobby-no-pager');
+  await tapId('lobby_pager_shown');
+}
+
+/** What the touch log said after each injected swipe: { theme, across, ms, log, opened, first } */
+const observations = [];
+
+/**
+ * A vertical swipe across a scroller, down then 263 ms later up, through its centre, from 10 % to 90 % of its height:
+ * the shape of UiScrollable's two swipes in scrollIntoView. `input swipe` is not UiScrollable: it injects its moves
+ * as fast as it can for the given time, where UiScrollable makes 55 steps. So this is an observation, not a check.
+ */
+async function injectedSwipe(across, scrollerId, ms) {
+  const nodes = dump();
+  const node = nodes.find((n) => n.id === scrollerId);
+  if (!node) throw new Error(`not on screen: ${scrollerId}`);
+  const first = nodes.find((n) => n.scrollable)?.id || '(none)';
+  const x = String(Math.round(node.x));
+  const top = String(Math.round(node.y1 + 0.1 * node.h));
+  const bottom = String(Math.round(node.y2 - 0.1 * node.h));
+  shell(`input swipe ${x} ${top} ${x} ${bottom} ${ms}; sleep 0.263; input swipe ${x} ${bottom} ${x} ${top} ${ms}`);
+  await sleep(1500);
+  const after = dump();
+  const log = (logNode(after)?.text ?? '(no log in the tree)').replaceAll('\n', ' / ');
+  const opened = ['lobby_sheet', 'lobby_detail', 'lobby_promo'].filter((id) => after.some((n) => n.id === id)).join(', ') || 'nothing';
+  observations.push({ theme, across, ms, log, opened, first });
+  say(`    OBSERVED ${across}, ${ms} ms a swipe (first scrollable: ${first}): the log says "${log}"; open: ${opened}`);
+  // back to the Lobby as it was
+  if (after.some((n) => n.id === 'lobby_sheet')) {
+    shell('input', 'keyevent', 'KEYCODE_BACK');
+    await sleep(700);
+  }
+  for (const back of ['lobby_detail_back', 'lobby_promo_back']) if (dump().some((n) => n.id === back)) await tapId(back);
+  await tapId('lobby_touch_reset');
+}
+
+async function lobbySwipes() {
+  await coldStart();
+  await signIn();
+  await openLobby();
+  for (const ms of [270, 1000]) await injectedSwipe('the pager', 'lobby_pager', ms);
+  for (const ms of [270, 1000]) await injectedSwipe('row 1, inside the page', 'lobby_row_1', ms);
+  await tapId('lobby_pager_shown');
+  await byId('lobby_top_row');
+  for (const ms of [270, 1000]) await injectedSwipe('the Top 10 row, the pager off', 'lobby_top_row', ms);
+  await tapId('lobby_pager_shown');
+}
+
 const SEGMENTS = [
   ['sign in and the shop', signInAndShop],
   ['item, cart and orders', itemCartAndOrders],
@@ -809,6 +973,8 @@ const SEGMENTS = [
   ['slow loads', slowLoads],
   ['gift cards', giftCards],
   ['deep link', deepLink],
+  ['the lobby', theLobby],
+  ['the lobby, an injected swipe', lobbySwipes],
 ];
 
 if (process.argv.includes('--plan')) {
@@ -891,6 +1057,14 @@ function reports() {
     ...(checks.length ? checks.map((c) => `- ${c.theme}, ${c.name}: ${c.ok ? 'pass' : '**FAIL**'}. ${c.detail}.`) : ['None ran.']),
     '',
     `UiAutomator dumps that failed five times in a row: ${failedDumps}.`,
+    '',
+    '## The Lobby: a vertical swipe across a scroller (observed, not checked)',
+    '',
+    'Two `input swipe`s through the scroller\'s centre, from 10 % to 90 % of its height and back 263 ms later: the shape of UiScrollable\'s two swipes in scrollIntoView, not its exact steps. What the touch log said after them:',
+    '',
+    ...(observations.length
+      ? ['| Theme | Across | A swipe | First scrollable | The touch log | Open after |', '| --- | --- | --- | --- | --- | --- |', ...observations.map((o) => `| ${o.theme} | ${o.across} | ${o.ms} ms | \`${o.first}\` | ${o.log} | ${o.opened} |`)]
+      : ['None ran.']),
     '',
     '## The device',
     '',
