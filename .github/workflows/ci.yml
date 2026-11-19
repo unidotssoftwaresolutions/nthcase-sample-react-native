@@ -5,12 +5,19 @@
 #                                     ios: the zipped simulator .app (macos: only a Mac builds for the iOS Simulator)
 #   the device suite, when asked      screenshots: every screen, light and dark, on an Android emulator, with the ids
 #   (`devices: true`)                 in UiAutomator's tree, the keyboard-up taps, and the Lobby's tree order
+#   always, last                      summary: every check in a table; it fails the run when any check failed or was
+#                                     cancelled, and lists a skipped one as skipped
 #
 # build.yml asks for the device suite on "Run workflow" and on the monthly schedule; release.yml always does. On a push
 # or a pull request the screenshots job is skipped: no emulator starts.
 #
 # One run tells every failure: the builds do not wait for the tests, each check step runs even when an earlier check
 # failed, and the screenshot walk reports every miss before it fails once at the end. Results are uploaded on failure.
+#
+# Each job is already one part that can fail on its own, so "Re-run failed jobs" re-runs only what failed (and the
+# summary). The checks in `test` stay together: each takes under a minute and all share one npm install. The walk in
+# `screenshots` stays one job: it is one script on one emulator, and its id table counts an id only when both themes
+# saw it. There are no retries anywhere: a flaky check is re-run by a person.
 #
 # Cached, under keys made of what they hold: npm's downloads (actions/setup-node, package-lock.json), Gradle's folders
 # (gradle/actions/setup-gradle's own keys), and CocoaPods' downloads and specs, keyed on what expo prebuild makes the
@@ -40,6 +47,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      typecheck: ${{ steps.typecheck.outcome }}
+      jest: ${{ steps.jest.outcome }}
+      doctor: ${{ steps.doctor.outcome }}
+      versions: ${{ steps.versions.outcome }}
+      plan: ${{ steps.plan.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -53,10 +66,12 @@ jobs:
         run: npm ci
       # each check runs whatever the one before it did, as long as the install worked
       - name: Typecheck
+        id: typecheck
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 5
         run: npm run typecheck
       - name: Jest
+        id: jest
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 10
         run: npm test -- --ci
@@ -64,6 +79,7 @@ jobs:
       # patch release turned a push that changed nothing red (run 44312162058). The doctor's own setting switches that
       # one check off here; every other doctor check still fails the build. The next step runs the same check itself.
       - name: expo-doctor
+        id: doctor
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 5
         env:
@@ -72,10 +88,12 @@ jobs:
       # The doctor's version check: a newer Expo patch release is a warning on the run (fix it with
       # `npx expo install --fix`); a major or minor drift, a missing package or a check that cannot run fails it.
       - name: Expo versions (a patch release only warns)
+        id: versions
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 5
         run: node scripts/expo-versions.mjs
       - name: The screenshot walk names a state for every spec id
+        id: plan
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 2
         run: node scripts/screenshots.mjs --plan
@@ -83,6 +101,9 @@ jobs:
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      apk: ${{ steps.apk.outcome }}
+      bundle: ${{ steps.bundle.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -105,10 +126,12 @@ jobs:
       - timeout-minutes: 10
         run: npx expo prebuild --platform android --clean --no-install
       # Release build type, signed with the debug keystore as Expo's template does: the JS bundle is inside.
-      - timeout-minutes: 45
+      - id: apk
+        timeout-minutes: 45
         run: ./gradlew assembleRelease --no-daemon --max-workers=3
         working-directory: android
       - name: Check the bundle is inside, and name the APK after the version
+        id: bundle
         timeout-minutes: 2
         env:
           VERSION: ${{ inputs.version }}
@@ -128,6 +151,8 @@ jobs:
   ios:
     runs-on: macos-latest
     timeout-minutes: 90
+    outputs:
+      app: ${{ steps.app.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -161,7 +186,8 @@ jobs:
       # ios/ is made here (with pod install), never committed.
       - timeout-minutes: 15
         run: npx expo prebuild --platform ios --clean
-      - timeout-minutes: 60
+      - id: app
+        timeout-minutes: 60
         env:
           VERSION: ${{ inputs.version }}
         run: scripts/build-ios-simulator.sh "$VERSION"
@@ -185,6 +211,8 @@ jobs:
     # the walk reads the tree in 35 states per theme, from 13 cold starts each (the Lobby's two segments are 1.1's). It
     # starts no segment after 50 minutes and waits at most 5 for a lost device, so its reports are written before this.
     timeout-minutes: 75
+    outputs:
+      walk: ${{ steps.walk.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -205,6 +233,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       # The one third-party action: it starts an emulator, runs the script, and shuts the emulator down.
       - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        id: walk
         timeout-minutes: 65
         env:
           APK: dist/mossgrove-react-native-${{ inputs.version }}-debug.apk
@@ -241,3 +270,59 @@ jobs:
           path: build/screenshots/
           if-no-files-found: error
           retention-days: 30
+
+  # Every check, from each job's own outcomes, after every job whatever they found. A check is read from its job's
+  # outputs, or, when the job never wrote them (skipped, or stopped before), from the job's result: a skipped check is
+  # listed as skipped, never as passed. Fails the run when any check, or any job outside its checks, failed or was
+  # cancelled; release.yml's github-release needs this workflow, so it publishes only after this is green.
+  summary:
+    name: Every check
+    needs: [test, android, ios, screenshots]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every check
+        timeout-minutes: 5
+        env:
+          CHECK_1: "Typecheck|${{ needs.test.outputs.typecheck || needs.test.result }}"
+          CHECK_2: "Jest|${{ needs.test.outputs.jest || needs.test.result }}"
+          CHECK_3: "expo-doctor|${{ needs.test.outputs.doctor || needs.test.result }}"
+          CHECK_4: "Expo versions|${{ needs.test.outputs.versions || needs.test.result }}"
+          CHECK_5: "The walk's plan|${{ needs.test.outputs.plan || needs.test.result }}"
+          CHECK_6: "The .apk (Gradle)|${{ needs.android.outputs.apk || needs.android.result }}"
+          CHECK_7: "The JS bundle inside the .apk|${{ needs.android.outputs.bundle || needs.android.result }}"
+          CHECK_8: "The simulator .app|${{ needs.ios.outputs.app || needs.ios.result }}"
+          CHECK_9: "The screenshot walk on an Android emulator|${{ needs.screenshots.outputs.walk || needs.screenshots.result }}"
+          JOB_1: "test|${{ needs.test.result }}"
+          JOB_2: "android|${{ needs.android.result }}"
+          JOB_3: "ios|${{ needs.ios.result }}"
+          JOB_4: "screenshots|${{ needs.screenshots.result }}"
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+
+          def numbered(prefix):
+              keys = [k for k in os.environ if k.startswith(prefix) and k[len(prefix):].isdigit()]
+              return [os.environ[k] for k in sorted(keys, key=lambda k: int(k[len(prefix):]))]
+
+          checks = [entry.rpartition("|")[::2] for entry in numbered("CHECK_")]
+          jobs = [entry.rpartition("|")[::2] for entry in numbered("JOB_")]
+          mark = {"success": "✅", "failure": "❌", "cancelled": "🚫"}
+          lines = ["## Every check", "", "| Check | Outcome |", "| --- | --- |"]
+          lines += [f"| {name} | {mark.get(outcome, '⏭️')} {outcome or 'not run'} |" for name, outcome in checks]
+          bad = ("failure", "cancelled")
+          failed = [name for name, outcome in checks if outcome in bad]
+          stray = [f"{job} ({result})" for job, result in jobs if result in bad]
+          if stray and not failed:
+              lines += ["", "A job failed outside its checks: " + ", ".join(stray)]
+          page = "\n".join(lines) + "\n"
+          print(page)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(page)
+          if failed or stray:
+              what = f"{len(failed)} of {len(checks)} checks failed or were cancelled: {', '.join(failed)}" if failed \
+                  else f"a job failed: {', '.join(stray)}"
+              print(f"::error title=Checks failed::{what}")
+              sys.exit(1)
+          EOF

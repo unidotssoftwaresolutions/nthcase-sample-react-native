@@ -268,8 +268,10 @@ stays green (bring it up with `npx expo install --fix`); a major or minor drift,
 Android emulator (every screen, light and dark, the ids, the keyboard-up taps, and on the Lobby the tree's first
 scrollable with the pager on and off and Saved's late arrival, about 25 minutes more), runs on "Run
 workflow", at 03:17 UTC on the 1st of each month, and before every release: a `v*` tag publishes only when the fast checks and the
-suite are green. To start the suite by hand, open Actions → build → Run workflow on `main`, or run
-`gh workflow run build.yml --ref main`. The jobs are in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+suite are green. The last job, "Every check", lists every check with its outcome. When one fails, **Re-run failed
+jobs** runs that job again (and the list), not the others. To start the suite by hand, open Actions → build → Run
+workflow on `main`, or run `gh workflow run build.yml --ref main`. The jobs are in
+[.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ## Licence
 
